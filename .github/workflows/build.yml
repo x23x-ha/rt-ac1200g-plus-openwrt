@@ -1,0 +1,70 @@
+name: build
+
+# Manual run: build and keep the files as workflow artifacts.
+# Tag v* (e.g. v25.12.6-1): also publish them as a GitHub release.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  OWRT_VERSION: 25.12.6
+  KVER: 6.12.112
+  SDK: openwrt-sdk-25.12.6-bcm53xx-generic_gcc-14.3.0_musl_eabi.Linux-x86_64.tar.zst
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache downloads
+        uses: actions/cache@v4
+        with:
+          path: build/dl
+          key: dl-${{ env.OWRT_VERSION }}
+
+      - name: Download SDK
+        run: |
+          mkdir -p build/dl build/out build/images
+          chmod a+rwx build/out build/images   # containers run as uid 1000
+          U=https://downloads.openwrt.org/releases/$OWRT_VERSION/targets/bcm53xx/generic
+          cd build/dl
+          [ -f "$SDK" ] || curl -fLO "$U/$SDK"
+          curl -fsSL "$U/sha256sums" | grep " \*$SDK\$" | sed 's/ \*/  /' | sha256sum -c -
+
+      - name: Build env image
+        run: docker build -t owrt-sdk-env build
+
+      - name: Build kmod-b43 (816 + 818 + 819)
+        run: build/run-build.sh
+
+      - name: Build images
+        run: |
+          pip install --user fdt
+          build/make-image.sh
+          FIRSTBOOT=1 build/make-image.sh
+
+      - name: Collect
+        run: |
+          mkdir dist
+          cp build/images/*.trx dist/
+          cp build/out/b43-stripped.ko dist/b43-$KVER.ko
+          cp build/out/kmod-b43-*.apk dist/
+          cd dist && sha256sum * > sha256sums && cat sha256sums
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rt-ac1200g-plus-openwrt-${{ env.OWRT_VERSION }}
+          path: dist/
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* --prerelease --title "OpenWrt $OWRT_VERSION for RT-AC1200G+ ($GITHUB_REF_NAME)" \
+            --notes "Built by CI from ${GITHUB_SHA::7}. See the README for flashing, and verify files against sha256sums. Only flash the *asus_rt-ac1200g-plus* images on an RT-AC1200G+."

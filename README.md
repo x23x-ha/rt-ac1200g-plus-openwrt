@@ -30,7 +30,31 @@ Status: tested on one hardware rev A unit. Use at your own risk.
 | 5 GHz | 802.11ac core integrated in the BCM47189 (no driver) |
 | GPIOs | reset 5 (low), WPS 9 (low), power/WPS LED 10 (low), USB LED 15 (low), USB power 8, switch reset 2 |
 
-## Firmware image
+## Quick start
+
+Take a ready image from [Releases](../../releases). Each release has two:
+
+- `…-asus_rt-ac1200g-plus-squashfs.trx`: **plain OpenWrt defaults.** root has no
+  password, LAN is 192.168.1.1 with DHCP, Wi-Fi is off (SSID "OpenWrt"), WAN is
+  DHCP client and closed. The fixed `b43.ko` is already included.
+- `…-firstboot.trx`: also takes over the stock Asuswrt settings on first boot:
+  2.4 GHz SSID/key, LAN IP, WAN MAC, and the root password from the ASUS admin
+  password. It opens SSH/LuCI on WAN for private source IPs, which is meant for
+  use behind another router. See `tools/rt-ac1200g-firstboot.sh`.
+
+To flash, see [Flashing from stock firmware](#flashing-from-stock-firmware).
+Then connect a cable to a LAN port and go to http://192.168.1.1. Set a root
+password and enable Wi-Fi.
+
+To build the same images yourself (Docker, about 10 min):
+
+```sh
+cd build && docker build --platform linux/amd64 -t owrt-sdk-env .
+# SDK into build/dl (see "Building kmod-b43"), then:
+./run-build.sh && ./make-image.sh          # FIRSTBOOT=1 ./make-image.sh for the variant
+```
+
+## How the image is made
 
 OpenWrt's **Tenda AC9** image uses the same SoC, radio and switch. Its device
 tree, however, makes DSA use switch port 5 as the CPU port. On this board only
@@ -51,10 +75,11 @@ pip install fdt            # plus liblzma >= 5.4 (macOS: brew install xz)
 tools/patch-trx-dtb.py openwrt-25.12.x-bcm53xx-generic-tenda_ac9-squashfs.trx rt-ac1200g-plus.trx
 ```
 
-Get the Tenda AC9 image from the [Firmware Selector](https://firmware-selector.openwrt.org/)
-(target bcm53xx/generic). Optionally paste `tools/rt-ac1200g-firstboot.sh` as
-the first-boot script there. It carries over the stock 2.4 GHz SSID/key, LAN
-IP, WAN MAC and root password (the ASUS admin password) from the ASUS nvram.
+`build/make-image.sh` does this on an ImageBuilder build that already has the
+fixed `b43.ko`. By hand, you can also patch any Tenda AC9 image, for example
+one from the [Firmware Selector](https://firmware-selector.openwrt.org/)
+(target bcm53xx/generic) with extra packages. That image still has the stock
+b43, so the 2.4 GHz radio stays weak until you install the fixed module.
 
 ### Flashing from stock firmware
 

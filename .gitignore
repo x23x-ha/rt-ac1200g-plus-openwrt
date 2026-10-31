@@ -12,3 +12,4 @@ wl.syms
 .DS_Store
 __pycache__/
 .venv/
+build/images/
