@@ -1,0 +1,122 @@
+# 1) Tenda AC9 -> port 8 CPU (tools/patch-trx-dtb.py, patch_ports)
+--- tenda_ac9 (stock OpenWrt build)
++++ rt-ac1200g-plus-port8 (flashed)
+@@ -187,6 +187,7 @@
+                         port@5 {
+                             reg = <0x5>;
+                             ethernet = <0x4>;
++                            status = "disabled";
+                             fixed-link {
+                                 speed = <0x3E8>;
+                                 full-duplex;
+@@ -196,6 +197,10 @@
+                             reg = <0x8>;
+                             ethernet = <0x5>;
+                             label = "cpu";
++                            fixed-link {
++                                speed = <0x3E8>;
++                                full-duplex;
++                            };
+                         };
+                     };
+                 };
+
+
+# 2) board: LEDs, buttons, USB power, model (patch_board)
+--- port8
++++ rt-ac1200g-plus
+@@ -8,9 +8,13 @@
+     #size-cells = <0x1>;
+     interrupt-parent = <0x1>;
+     compatible = "tenda,ac9", "brcm,bcm47189", "brcm,bcm53573";
+-    model = "Tenda AC9";
++    model = "ASUS RT-AC1200G+";
+     aliases {
+         serial0 = "/axi@18000000/chipcommon@0/serial@300";
++        led-boot = "/leds/led-power";
++        led-failsafe = "/leds/led-power";
++        led-running = "/leds/led-power";
++        led-upgrade = "/leds/led-power";
+     };
+     chosen {
+         stdout-path = "serial0:115200n8";
+@@ -111,6 +115,7 @@
+             ranges;
+             #address-cells = <0x1>;
+             #size-cells = <0x1>;
++            vcc-gpios = <0x6 0x8 0x0>;
+             usb@4000 {
+                 compatible = "generic-ehci";
+                 reg = <0x4000 0x1000>;
+@@ -126,6 +131,7 @@
+                 port@2 {
+                     reg = <0x2>;
+                     #trigger-source-cells = <0x0>;
++                    phandle = <0xA>;
+                 };
+             };
+             usb@d000 {
+@@ -143,6 +149,7 @@
+                 port@2 {
+                     reg = <0x2>;
+                     #trigger-source-cells = <0x0>;
++                    phandle = <0xB>;
+                 };
+             };
+         };
+@@ -231,46 +238,26 @@
+         device_type = "memory";
+         reg = <0x0 0x8000000>;
+     };
+-    leds-0 {
++    leds {
+         compatible = "gpio-leds";
++        led-power {
++            label = "bcm53xx:blue:power";
++            gpios = <0x6 0xA 0x1>;
++            default-state = "on";
++        };
+         led-usb {
+             label = "bcm53xx:blue:usb";
+-            gpios = <0x6 0x1 0x0>;
+-            trigger-sources = <0x7 0x8>;
++            gpios = <0x6 0xF 0x1>;
++            trigger-sources = <0x8 0xA 0x7 0xB>;
+             linux,default-trigger = "usbport";
+         };
+-        led-wps {
+-            label = "bcm53xx:blue:wps";
+-            gpios = <0x6 0xA 0x0>;
+-        };
+-        led-5ghz {
+-            label = "bcm53xx:blue:5ghz";
+-            gpios = <0x6 0xB 0x0>;
+-        };
+-        led-system {
+-            label = "bcm53xx:blue:system";
+-            gpios = <0x6 0xF 0x0>;
+-            linux,default-trigger = "timer";
+-        };
+     };
+-    leds-1 {
+-        compatible = "gpio-leds";
+-        led-2ghz {
+-            label = "bcm53xx:blue:2ghz";
+-            gpios = <0x9 0x3 0x0>;
+-        };
+-    };
+     gpio-keys {
+         compatible = "gpio-keys";
+-        button-rfkill {
+-            label = "WiFi";
+-            linux,code = <0xF7>;
+-            gpios = <0x6 0x3 0x1>;
+-        };
+         button-restart {
+             label = "Reset";
+             linux,code = <0x198>;
+-            gpios = <0x6 0x7 0x1>;
++            gpios = <0x6 0x5 0x1>;
+         };
+         button-wps {
+             label = "WPS";

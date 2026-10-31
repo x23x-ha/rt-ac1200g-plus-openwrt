@@ -1,0 +1,172 @@
+# OpenWrt on the ASUS RT-AC1200G+
+
+Running OpenWrt 25.12 on the ASUS RT-AC1200G+ (BCM47189), which has no
+official OpenWrt support, and fixing its 2.4 GHz radio in the `b43` driver.
+
+What works:
+
+- **Ethernet:** WAN + 4 LAN ports through the BCM53125 switch.
+- **Device tree:** LEDs, reset/WPS buttons and USB port power follow the ASUS
+  layout.
+- **2.4 GHz Wi-Fi (b43):** 802.11g, with the external PA enabled and closed-loop
+  TX power control.
+
+What doesn't:
+
+- **5 GHz:** the 802.11ac core inside the SoC has no Linux driver.
+- **802.11n:** b43 runs this radio as 802.11g only ("no HT"). Expect a 54 Mbit/s
+  link and about 20 Mbit/s real throughput.
+
+Status: tested on one hardware rev A unit. Use at your own risk.
+
+## Hardware
+
+| | |
+|---|---|
+| SoC | Broadcom BCM47189 (BCM53573 family), 1x Cortex-A7 900 MHz, 128 MB RAM |
+| Flash | 16 MB SPI NOR: `boot` (CFE) 0x0–0x40000, `linux` (TRX) 0x40000–0xff0000, `nvram` 0xff0000– |
+| Switch | BCM53125: wan = port 0, lan1–4 = ports 1–4, **CPU = port 8 ↔ gmac0** |
+| 2.4 GHz | BCM43217 on PCIe: N-PHY rev 17, radio 2057 rev 14, **external PA** |
+| 5 GHz | 802.11ac core integrated in the BCM47189 (no driver) |
+| GPIOs | reset 5 (low), WPS 9 (low), power/WPS LED 10 (low), USB LED 15 (low), USB power 8, switch reset 2 |
+
+## Firmware image
+
+OpenWrt's **Tenda AC9** image uses the same SoC, radio and switch. Its device
+tree, however, makes DSA use switch port 5 as the CPU port. On this board only
+port 8 is wired, so the Tenda image as-is boots with **no Ethernet at all**.
+
+`tools/patch-trx-dtb.py` rewrites the device tree inside a Tenda AC9 TRX:
+
+1. **Port fix:** switch port 5 is disabled, and port 8 gets a fixed link.
+2. **Board fix:** the model name, LEDs, buttons, USB VBUS GPIO and `led-*`
+   aliases are set for the ASUS. `compatible` stays `tenda,ac9`, so
+   sysupgrade's board check keeps working.
+
+The rootfs is untouched and the script verifies its own output. See
+`docs/dtb-patch.diff` for exactly what changes.
+
+```sh
+pip install fdt            # plus liblzma >= 5.4 (macOS: brew install xz)
+tools/patch-trx-dtb.py openwrt-25.12.x-bcm53xx-generic-tenda_ac9-squashfs.trx rt-ac1200g-plus.trx
+```
+
+Get the Tenda AC9 image from the [Firmware Selector](https://firmware-selector.openwrt.org/)
+(target bcm53xx/generic). Optionally paste `tools/rt-ac1200g-firstboot.sh` as
+the first-boot script there. It carries over the stock 2.4 GHz SSID/key, LAN
+IP, WAN MAC and root password (the ASUS admin password) from the ASUS nvram.
+
+### Flashing from stock firmware
+
+The stock web UI refuses OpenWrt images. Instead:
+
+1. Enable SSH in Asuswrt.
+2. Copy the patched `.trx` to `/tmp` on the router.
+3. Run `mtd-write2 /tmp/rt-ac1200g-plus.trx linux`, then reboot.
+
+> **Never flash an unpatched image**: no plain Tenda AC9 image, and no LuCI
+> "Attended Sysupgrade" (it fetches the stock Tenda image). Either one leaves
+> you without Ethernet. Always patch first, then `sysupgrade`.
+> Never write `boot` (CFE) or `nvram`.
+
+**Recovery:** CFE has a rescue mode.
+
+1. Hold reset while powering on.
+2. Set a wired PC to 192.168.1.10/24.
+3. `tftp` (binary) a *patched* `.trx` to 192.168.1.1.
+
+### Kernel-only update (keeps the overlay)
+
+The DT lives in the kernel part of the TRX, so a DT change only touches the
+flash blocks before the rootfs. Writing just those blocks keeps all installed
+packages and config. A sysupgrade would wipe packages.
+
+Caveat: on first boot, OpenWrt's `fixtrx` rewrites the on-flash TRX header so
+that `len` covers only the kernel (0x30c400 here), with the CRC computed over
+that range. A rebuilt header has to follow the same rule.
+
+```sh
+# compare the old and new image per 64 KiB block; build block 0 with the
+# fixtrx-style header; then on the router, one call per changed block:
+mtd -f -p <offset> write <block.bin> firmware
+dd if=/dev/mtd1 bs=65536 count=<n> | sha256sum      # verify before reboot
+```
+
+## 2.4 GHz: b43 patches
+
+Mainline b43 transmits about 26 dB too weakly on this board. Three things were
+missing for BCM43217 with an external PA; all three were found by comparing
+b43 with the vendor `wl.ko` and brcmsmac:
+
+| Patch | Fix |
+|---|---|
+| `816` | 2 GHz EPA TX gain table for radio 2057 rev 14. b43 had none for N-PHY rev 7+. Extracted from the vendor `wl.ko` (`wlc_phy_get_epa_gaintbl_nphy`). |
+| `818` | Enables the external PA/LNA control lines (PMU chipcontrol 1, bits 0x2000/0x2100), as `wlc_phy_init_nphy` does. Without this the external PA never turns on. Adds `nphy_txidx=N` (fixed gain index). |
+| `819` | Routes the 2057 TSSI mux to the external power detector (`TX0/TX1_TX_SSI_MUX = 0x11`, `IQTEST_SEL_PU = 1`), as `wl` and brcmsmac do. This makes hardware TX power control work: it settles at the 20 dBm target instead of pinning maximum gain. |
+
+Results (same spot, a MacBook's RSSI for the AP):
+
+| Driver | RSSI | Notes |
+|---|---|---|
+| stock b43 | -73 dBm | 2.7 tries/packet |
+| 816 + 818, fixed index 40 | -33…-44 dBm | 14/11 Mbit/s |
+| 816 + 818 + 819, closed loop | +4 dB over idx 40 | 18/18 Mbit/s, 7 ms, 0.2 retries/packet, from farther away |
+
+TX power set in LuCI/`iw` (`wireless.radio0.txpower`) is now honoured.
+
+`patches/mac80211/brcm-debug/` and `brcm-tssi/` hold debug variants. `brcm-tssi`
+adds `nphy_tssi_test=1`, which logs the power control loop state every 15 s.
+
+### Building `kmod-b43`
+
+The build uses the OpenWrt SDK for the exact release, in Docker (`linux/amd64`;
+it works on Apple Silicon too).
+
+```sh
+mkdir -p build/dl && cd build/dl
+curl -LO https://downloads.openwrt.org/releases/25.12.6/targets/bcm53xx/generic/openwrt-sdk-25.12.6-bcm53xx-generic_gcc-14.3.0_musl_eabi.Linux-x86_64.tar.zst
+cd .. && docker build --platform linux/amd64 -t owrt-sdk-env .
+./run-build.sh            # -> build/out/b43-stripped.ko, kmod-b43-*.apk  (~6 min)
+```
+
+The `.ko` must match the router's kernel exactly (25.12.6: 6.12.112). Install
+and test as follows:
+
+- **Test without persisting:** `build/rt-test.sh build/out/b43-stripped.ko`
+  (set `ROUTER=root@<ip>`). It loads the module from `/tmp`.
+- **Persist:** copy the module over `/lib/modules/<kver>/b43.ko`. It lands in
+  the overlay.
+- **Roll back:** `rm /overlay/upper/lib/modules/<kver>/b43.ko; reboot`.
+
+A `kmod-b43` upgrade or a sysupgrade replaces the module.
+
+SDK gotcha: the SDK's `Config-build.in` forces `default m` on every release
+package. `build-b43.sh` strips those defaults so that only mac80211/b43 get
+built.
+
+## Reverse-engineering helpers
+
+`re/` holds small pyelftools/capstone scripts used on the vendor `wl.ko` (not
+included; take it from the stock firmware's squashfs or the ASUS GPL tarball):
+
+- symbol and `.data` reference lookup,
+- ARM disassembly with relocations,
+- immediate/word search.
+
+`tools/wl-extract-epa-table.py` regenerates the 816 table from `wl.ko` and
+checks itself against tables that b43/brcmsmac also carry.
+
+`pip install pyelftools capstone`
+
+## Not done / ideas
+
+- **5 GHz:** needs an AC-PHY driver (b43's is a stub marked BROKEN). A USB
+  adapter on an mt76 driver (e.g. MT7612U) is the realistic route. USB power
+  is already enabled by the DT patch.
+- **Upstreaming:** the b43 patches to linux-wireless, and a proper OpenWrt
+  device definition.
+
+## License
+
+GPL-2.0-only (see `LICENSE`), matching the Linux kernel and OpenWrt code these
+patches apply to.

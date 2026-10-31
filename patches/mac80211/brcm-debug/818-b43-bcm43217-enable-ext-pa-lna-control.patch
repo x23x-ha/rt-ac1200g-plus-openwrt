@@ -1,0 +1,62 @@
+From: OpenWrt RT-AC1200G+ port
+Subject: [PATCH] b43: BCM43217: route external PA/LNA control via PMU chipcontrol
+
+The vendor wl driver (wlc_phy_init_nphy) sets PMU chipcontrol 1 bit 0x2000
+on BCM43217 boards with an external LNA and bits 0x2100 when the external
+PA uses digital control (BFL2_ANAPACTRL_* clear). b43 did neither, so the
+external 2.4 GHz PA of EPA boards (ASUS RT-AC1200G+) never turned on.
+
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -5973,6 +5973,41 @@
+ }
+ 
+ /* http://bcm-v4.sipsolutions.net/802.11/PHY/Init/N */
++#ifdef CPTCFG_B43_BCMA
++/* BCM43217: the vendor driver (wlc_phy_init_nphy) routes the external
++ * LNA / digital PA control lines through PMU chipcontrol 1. Without this
++ * the external 2.4 GHz PA of EPA boards is never enabled. */
++static void b43_nphy_bcm43217_fem_ctl(struct b43_wldev *dev)
++{
++	struct ssb_sprom *sprom = dev->dev->bus_sprom;
++	struct bcma_drv_cc *cc;
++	u32 before, after;
++
++	if (dev->dev->bus_type != B43_BUS_BCMA ||
++	    dev->dev->chip_id != BCMA_CHIP_ID_BCM43217)
++		return;
++	cc = &dev->dev->bdev->bus->drv_cc;
++	if (!cc->pmu.core)
++		return;
++
++	bcma_pmu_write32(cc, BCMA_CC_PMU_CHIPCTL_ADDR, 1);
++	before = bcma_pmu_read32(cc, BCMA_CC_PMU_CHIPCTL_DATA);
++
++	if (sprom->boardflags_lo & B43_BFL_EXTLNA)
++		bcma_chipco_chipctl_maskset(cc, 1, ~0x2000, 0x2000);
++	/* external PA with digital control (no BFL2_ANAPACTRL_2G/5G) */
++	if (!b43_nphy_ipa(dev) &&
++	    !(sprom->boardflags2_hi & ((b43_current_band(dev->wl) ==
++					NL80211_BAND_2GHZ) ? 0x0010 : 0x0020)))
++		bcma_chipco_chipctl_maskset(cc, 1, ~0x2100, 0x2100);
++
++	bcma_pmu_write32(cc, BCMA_CC_PMU_CHIPCTL_ADDR, 1);
++	after = bcma_pmu_read32(cc, BCMA_CC_PMU_CHIPCTL_DATA);
++	b43info(dev->wl, "dbg: 43217 PMU chipctl1 0x%08x -> 0x%08x\n",
++		before, after);
++}
++#endif
++
+ static int b43_phy_initn(struct b43_wldev *dev)
+ {
+ 	struct ssb_sprom *sprom = dev->dev->bus_sprom;
+@@ -6004,6 +6039,9 @@
+ #endif
+ 		}
+ 	}
++#ifdef CPTCFG_B43_BCMA
++	b43_nphy_bcm43217_fem_ctl(dev);
++#endif
+ 	nphy->use_int_tx_iq_lo_cal = b43_nphy_ipa(dev) ||
+ 		phy->rev >= 7 ||
+ 		(phy->rev >= 5 &&

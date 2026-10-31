@@ -1,0 +1,61 @@
+From: OpenWrt RT-AC1200G+ port
+Subject: [PATCH] b43: N-PHY: route the 2057 TSSI mux to the external PA detector
+
+On rev7+ N-PHYs with radio 2057 and an external PA, the vendor wl driver
+(wlc_phy_txpwrctrl_idle_tssi_nphy) and brcmsmac (brcms_phy_wr_tx_mux) set
+TX0/TX1_TX_SSI_MUX = 0x11 and IQTEST_SEL_PU = 1 before measuring idle TSSI.
+b43 only did this for radio 2056, so on BCM43217 EPA boards TSSI read a flat
+idle value and HW TX power control pinned the maximum gain index.
+
+With the detector routed, HW TX power control works on the RT-AC1200G+
+(estimate tracks output, loop settles at the 20 dBm target, idx ~33), so it is
+no longer forced off on BCM43217 EPA boards. nphy_txidx=N still selects a
+fixed gain index and turns HW power control off.
+
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -28,7 +28,7 @@
+  * Use a fixed gain index instead (0 = max, ~0.5 dB per step). */
+ static int nphy_txidx = -1;
+ module_param(nphy_txidx, int, 0444);
+-MODULE_PARM_DESC(nphy_txidx, "N-PHY rev7+ fixed TX gain index 0..127 (BCM43217 EPA default 40)");
++MODULE_PARM_DESC(nphy_txidx, "N-PHY rev7+: disable HW TX power control, use this fixed TX gain index 0..127");
+ 
+ static bool b43_nphy_bcm43217_epa(struct b43_wldev *dev)
+ {
+@@ -3943,6 +3943,17 @@
+  * get TSSI (Transmit Signal Strength Indicator).
+  * https://bcm-v4.sipsolutions.net/802.11/PHY/N/TxPwrCtrlIdleTssi
+  */
++/* External PA on radio 2057: route the TX SSI mux of both cores to the
++ * external power detector, as wl (wlc_phy_txpwrctrl_idle_tssi_nphy) and
++ * brcmsmac (brcms_phy_wr_tx_mux) do. Without it TSSI reads a flat idle value
++ * and HW TX power control pins the maximum gain. */
++static void b43_nphy_epa_2057_tssi_setup(struct b43_wldev *dev)
++{
++	b43_radio_write(dev, R2057_TX0_TX_SSI_MUX, 0x11);
++	b43_radio_write(dev, R2057_TX1_TX_SSI_MUX, 0x11);
++	b43_radio_write(dev, R2057_IQTEST_SEL_PU, 0x1);
++}
++
+ static void b43_nphy_tx_power_ctl_idle_tssi(struct b43_wldev *dev)
+ {
+ 	struct b43_phy *phy = &dev->phy;
+@@ -3956,6 +3967,8 @@
+ 
+ 	if (b43_nphy_ipa(dev))
+ 		b43_nphy_ipa_internal_tssi_setup(dev);
++	else if (phy->radio_ver == 0x2057 && phy->rev >= 7 && phy->rev < 19)
++		b43_nphy_epa_2057_tssi_setup(dev);
+ 
+ 	if (phy->rev >= 19)
+ 		b43_nphy_rf_ctl_override_rev19(dev, 0x1000, 0, 3, false, 0);
+@@ -6525,7 +6538,7 @@
+ 		nphy->ipa5g_on = sprom->fem.ghz5.extpa_gain == 2;
+ 	}
+ 
+-	if (b43_nphy_bcm43217_epa(dev))
++	if (dev->phy.rev >= 7 && nphy_txidx >= 0 && nphy_txidx < 128)
+ 		nphy->txpwrctrl = false;
+ }
+ 

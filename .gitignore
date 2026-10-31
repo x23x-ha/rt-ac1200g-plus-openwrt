@@ -1,0 +1,14 @@
+# build inputs/outputs (large, reproducible)
+build/dl/
+build/out*/
+*.log
+# firmware images and vendor binaries: may contain passwords / are proprietary
+*.trx
+*.bin
+*.ko
+*.apk
+wl.syms
+# local
+.DS_Store
+__pycache__/
+.venv/

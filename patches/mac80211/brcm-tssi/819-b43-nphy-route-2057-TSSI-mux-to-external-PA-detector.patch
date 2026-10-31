@@ -1,0 +1,104 @@
+From: OpenWrt RT-AC1200G+ port
+Subject: [PATCH] b43: N-PHY: route the 2057 TSSI mux to the external PA detector
+
+On rev7+ N-PHYs with radio 2057 and an external PA, the vendor wl driver
+(wlc_phy_txpwrctrl_idle_tssi_nphy) and brcmsmac (brcms_phy_wr_tx_mux) set
+TX0/TX1_TX_SSI_MUX = 0x11 and IQTEST_SEL_PU = 1 before measuring idle TSSI.
+b43 only did this for radio 2056, so on BCM43217 EPA boards TSSI reads a flat
+idle value and HW TX power control pins the maximum gain index.
+
+TEST: nphy_tssi_test=1 keeps HW TX power control on for BCM43217 EPA and logs
+the idle TSSI and, every 15 s, the loop state (drop before upstreaming).
+
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -30,6 +30,11 @@
+ module_param(nphy_txidx, int, 0444);
+ MODULE_PARM_DESC(nphy_txidx, "N-PHY rev7+ fixed TX gain index 0..127 (BCM43217 EPA default 40)");
+ 
++/* TEST ONLY: keep HW TX power control on for BCM43217 EPA and log idle TSSI */
++static bool nphy_tssi_test;
++module_param(nphy_tssi_test, bool, 0444);
++MODULE_PARM_DESC(nphy_tssi_test, "test: HW TX power control on BCM43217 EPA, log idle TSSI");
++
+ static bool b43_nphy_bcm43217_epa(struct b43_wldev *dev)
+ {
+ 	return dev->dev->chip_id == BCMA_CHIP_ID_BCM43217 &&
+@@ -3943,6 +3948,17 @@
+  * get TSSI (Transmit Signal Strength Indicator).
+  * https://bcm-v4.sipsolutions.net/802.11/PHY/N/TxPwrCtrlIdleTssi
+  */
++/* External PA on radio 2057: route the TX SSI mux of both cores to the
++ * external power detector, as wl (wlc_phy_txpwrctrl_idle_tssi_nphy) and
++ * brcmsmac (brcms_phy_wr_tx_mux) do. Without it TSSI reads a flat idle value
++ * and HW TX power control pins the maximum gain. */
++static void b43_nphy_epa_2057_tssi_setup(struct b43_wldev *dev)
++{
++	b43_radio_write(dev, R2057_TX0_TX_SSI_MUX, 0x11);
++	b43_radio_write(dev, R2057_TX1_TX_SSI_MUX, 0x11);
++	b43_radio_write(dev, R2057_IQTEST_SEL_PU, 0x1);
++}
++
+ static void b43_nphy_tx_power_ctl_idle_tssi(struct b43_wldev *dev)
+ {
+ 	struct b43_phy *phy = &dev->phy;
+@@ -3956,6 +3972,8 @@
+ 
+ 	if (b43_nphy_ipa(dev))
+ 		b43_nphy_ipa_internal_tssi_setup(dev);
++	else if (phy->radio_ver == 0x2057 && phy->rev >= 7 && phy->rev < 19)
++		b43_nphy_epa_2057_tssi_setup(dev);
+ 
+ 	if (phy->rev >= 19)
+ 		b43_nphy_rf_ctl_override_rev19(dev, 0x1000, 0, 3, false, 0);
+@@ -3991,6 +4009,10 @@
+ 	}
+ 	nphy->pwr_ctl_info[0].idle_tssi_2g = (tmp >> 24) & 0xFF;
+ 	nphy->pwr_ctl_info[1].idle_tssi_2g = (tmp >> 8) & 0xFF;
++	if (nphy_tssi_test)
++		b43info(dev->wl, "idle TSSI 2g %u/%u\n",
++			nphy->pwr_ctl_info[0].idle_tssi_2g,
++			nphy->pwr_ctl_info[1].idle_tssi_2g);
+ }
+ 
+ /* https://bcm-v4.sipsolutions.net/PHY/N/TxPwrLimitToTbl */
+@@ -6525,7 +6547,7 @@
+ 		nphy->ipa5g_on = sprom->fem.ghz5.extpa_gain == 2;
+ 	}
+ 
+-	if (b43_nphy_bcm43217_epa(dev))
++	if (b43_nphy_bcm43217_epa(dev) && !nphy_tssi_test)
+ 		nphy->txpwrctrl = false;
+ }
+ 
+@@ -6698,6 +6720,24 @@
+ 	return 36;
+ }
+ 
++/* TEST ONLY: TX power control loop state */
++static void b43_nphy_op_pwork_15sec(struct b43_wldev *dev)
++{
++	u16 s1, s2;
++
++	if (!nphy_tssi_test)
++		return;
++	s1 = b43_phy_read(dev, B43_NPHY_C1_TXPCTL_STAT);
++	s2 = b43_phy_read(dev, B43_NPHY_C2_TXPCTL_STAT);
++	b43info(dev->wl, "pctl cmd 0x%04x idx %u/%u est %u/%u itssi 0x%04x tpwr 0x%04x\n",
++		b43_phy_read(dev, B43_NPHY_TXPCTL_CMD),
++		(s1 & B43_NPHY_TXPCTL_STAT_BIDX) >> B43_NPHY_TXPCTL_STAT_BIDX_SHIFT,
++		(s2 & B43_NPHY_TXPCTL_STAT_BIDX) >> B43_NPHY_TXPCTL_STAT_BIDX_SHIFT,
++		s1 & 0xff, s2 & 0xff,
++		b43_phy_read(dev, B43_NPHY_TXPCTL_ITSSI),
++		b43_phy_read(dev, B43_NPHY_TXPCTL_TPWR));
++}
++
+ const struct b43_phy_operations b43_phyops_n = {
+ 	.allocate		= b43_nphy_op_allocate,
+ 	.free			= b43_nphy_op_free,
+@@ -6711,4 +6751,5 @@
+ 	.switch_channel		= b43_nphy_op_switch_channel,
+ 	.get_default_chan	= b43_nphy_op_get_default_chan,
+ 	.recalc_txpower		= b43_nphy_op_recalc_txpower,
++	.pwork_15sec		= b43_nphy_op_pwork_15sec,
+ };

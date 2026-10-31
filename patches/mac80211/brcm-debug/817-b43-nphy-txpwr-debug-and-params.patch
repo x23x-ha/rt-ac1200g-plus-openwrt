@@ -1,0 +1,102 @@
+From: OpenWrt RT-AC1200G+ port
+Subject: [PATCH] b43: N-PHY TX power debug output + test params (NOT for upstream)
+
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -21,6 +21,15 @@
+ #include "radio_2055.h"
+ #include "radio_2056.h"
+ #include "radio_2057.h"
++
++/* RT-AC1200G+ bring-up experiments (not for upstream) */
++#include <linux/moduleparam.h>
++static int nphy_txpctl = -1;
++module_param(nphy_txpctl, int, 0444);
++MODULE_PARM_DESC(nphy_txpctl, "N-PHY HW TX power control: -1 driver default, 0 off, 1 on");
++static int nphy_txidx = -1;
++module_param(nphy_txidx, int, 0444);
++MODULE_PARM_DESC(nphy_txidx, "N-PHY rev7+ fixed TX gain index 0..127 used while HW TX power control is off");
+ #include "main.h"
+ #include "ppr.h"
+ 
+@@ -3748,6 +3757,8 @@
+ 	/* TODO: rev19+ */
+ 	if (dev->phy.rev >= 7) {
+ 		txpi[0] = txpi[1] = 30;
++		if (nphy_txidx >= 0 && nphy_txidx < 128)
++			txpi[0] = txpi[1] = nphy_txidx;
+ 	} else if (dev->phy.rev >= 3) {
+ 		txpi[0] = 40;
+ 		txpi[1] = 40;
+@@ -3789,6 +3800,8 @@
+ 		if (!table)
+ 			break;
+ 		txgain = *(table + txpi[i]);
++		b43info(dev->wl, "dbg: tx_power_fix core %u idx %u gain 0x%08x\n",
++			i, txpi[i], txgain);
+ 
+ 		if (dev->phy.rev >= 3)
+ 			radio_gain = (txgain >> 16) & 0x1FFFF;
+@@ -3973,6 +3986,9 @@
+ 	}
+ 	nphy->pwr_ctl_info[0].idle_tssi_2g = (tmp >> 24) & 0xFF;
+ 	nphy->pwr_ctl_info[1].idle_tssi_2g = (tmp >> 8) & 0xFF;
++	b43info(dev->wl, "dbg: idle TSSI raw 0x%08x -> 2g c0 %u c1 %u\n", tmp,
++		nphy->pwr_ctl_info[0].idle_tssi_2g,
++		nphy->pwr_ctl_info[1].idle_tssi_2g);
+ }
+ 
+ /* https://bcm-v4.sipsolutions.net/PHY/N/TxPwrLimitToTbl */
+@@ -4191,6 +4207,10 @@
+ 		      target[0] << B43_NPHY_TXPCTL_TPWR_0_SHIFT |
+ 		      target[1] << B43_NPHY_TXPCTL_TPWR_1_SHIFT);
+ 
++	b43info(dev->wl, "dbg: pwrctl setup idle %u/%u target %d/%d a1 %d/%d b0 %d/%d b1 %d/%d ppr_max %u tssipos %u\n",
++		idle[0], idle[1], target[0], target[1], a1[0], a1[1],
++		b0[0], b0[1], b1[0], b1[1], ppr_max, sprom->fem.ghz2.tssipos);
++
+ 	for (c = 0; c < 2; c++) {
+ 		for (i = 0; i < 64; i++) {
+ 			num = 8 * (16 * b0[c] + b1[c] * i);
+@@ -6477,6 +6497,12 @@
+ 		nphy->ipa2g_on = sprom->fem.ghz2.extpa_gain == 2;
+ 		nphy->ipa5g_on = sprom->fem.ghz5.extpa_gain == 2;
+ 	}
++
++	if (nphy_txpctl == 0 || nphy_txpctl == 1)
++		nphy->txpwrctrl = nphy_txpctl;
++	b43info(dev->wl, "dbg: txpwrctrl %d (param %d) txidx param %d extpa_gain2g %u ipa2g %d\n",
++		nphy->txpwrctrl, nphy_txpctl, nphy_txidx,
++		sprom->fem.ghz2.extpa_gain, nphy->ipa2g_on);
+ }
+ 
+ static void b43_nphy_op_free(struct b43_wldev *dev)
+@@ -6648,6 +6674,22 @@
+ 	return 36;
+ }
+ 
++static void b43_nphy_op_pwork_15sec(struct b43_wldev *dev)
++{
++	u16 cmd = b43_phy_read(dev, B43_NPHY_TXPCTL_CMD);
++	u16 s1 = b43_phy_read(dev, B43_NPHY_C1_TXPCTL_STAT);
++	u16 s2 = b43_phy_read(dev, B43_NPHY_C2_TXPCTL_STAT);
++	const u32 *t = b43_nphy_get_tx_gain_table(dev);
++	u8 i1 = (s1 & B43_NPHY_TXPCTL_STAT_BIDX) >> B43_NPHY_TXPCTL_STAT_BIDX_SHIFT;
++	u8 i2 = (s2 & B43_NPHY_TXPCTL_STAT_BIDX) >> B43_NPHY_TXPCTL_STAT_BIDX_SHIFT;
++
++	b43info(dev->wl, "dbg: pctl cmd 0x%04x stat1 0x%04x (idx %u est %u) stat2 0x%04x (idx %u est %u) itssi 0x%04x tpwr 0x%04x gain %08x/%08x\n",
++		cmd, s1, i1, s1 & 0xff, s2, i2, s2 & 0xff,
++		b43_phy_read(dev, B43_NPHY_TXPCTL_ITSSI),
++		b43_phy_read(dev, B43_NPHY_TXPCTL_TPWR),
++		t ? t[i1] : 0, t ? t[i2] : 0);
++}
++
+ const struct b43_phy_operations b43_phyops_n = {
+ 	.allocate		= b43_nphy_op_allocate,
+ 	.free			= b43_nphy_op_free,
+@@ -6661,4 +6703,5 @@
+ 	.switch_channel		= b43_nphy_op_switch_channel,
+ 	.get_default_chan	= b43_nphy_op_get_default_chan,
+ 	.recalc_txpower		= b43_nphy_op_recalc_txpower,
++	.pwork_15sec		= b43_nphy_op_pwork_15sec,
+ };
