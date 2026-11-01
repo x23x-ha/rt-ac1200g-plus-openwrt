@@ -8,14 +8,17 @@ What works:
 - **Ethernet:** WAN + 4 LAN ports through the BCM53125 switch.
 - **Device tree:** LEDs, reset/WPS buttons and USB port power follow the ASUS
   layout.
-- **2.4 GHz Wi-Fi (b43):** 802.11g, with the external PA enabled and closed-loop
-  TX power control.
+- **2.4 GHz Wi-Fi (b43):** the external PA enabled and closed-loop TX power
+  control. 802.11g out of the box; **802.11n HT20** with the HT build
+  (`HT=1`, see [802.11n](#24-ghz-80211n-ht20)): 32-35 down / 55-58 up
+  Mbit/s on an iPhone, against 18/18 on 802.11g.
 
 What doesn't:
 
 - **5 GHz:** the 802.11ac core inside the SoC has no Linux driver.
-- **802.11n:** b43 runs this radio as 802.11g only ("no HT"). Expect a 54 Mbit/s
-  link and about 20 Mbit/s real throughput.
+- **2.4 GHz extras:** sending two streams or STBC fails on this radio, and
+  some clients (seen with an Apple Mac) lose A-MPDUs to the firmware. The HT
+  build works around both (see below).
 
 Status: tested on one hardware rev A unit. Use at your own risk.
 
@@ -141,6 +144,38 @@ TX power set in LuCI/`iw` (`wireless.radio0.txpower`) is now honoured.
 
 `patches/mac80211/brcm-debug/` and `brcm-tssi/` hold debug variants. `brcm-tssi`
 adds `nphy_tssi_test=1`, which logs the power control loop state every 15 s.
+
+## 2.4 GHz: 802.11n (HT20)
+
+`patches/mac80211/brcm-ht/` is the b43 HT series from
+[OpenWrt PR #25922](https://github.com/openwrt/openwrt/pull/25922) by Rosen
+Penev (HT20, A-MPDU in both directions, two RX streams, STBC, NAPI, …),
+rebased from backports 7.2 onto 25.12's 6.18.55 (only patch 813 needed a
+manual change), plus this board's patches on top:
+
+| Patch | |
+|---|---|
+| 880–882 | 816/818/819 above, renumbered to apply after the series |
+| 883 | N-PHY rev 7+: one TX stream and no TX STBC by default. Each TX chain alone sends clean OFDM, but frames on both chains (STBC, MCS 8-15) mostly fail at the receiver. RX keeps MCS 0-15. Override: `ht_txchains`, `ht_stbc`. |
+| 885 | Per-station A-MPDU fallback. The firmware (666.2 and 784.2 alike) ignores about a third of the block acks of an Apple 2x2 client, although they arrive on time (+1 µs median) and are well formed, so every MPDU of those A-MPDUs is sent again. When more than `ampdu_noba_pct` (35 %) of 64 A-MPDUs to a station get no block ack, send to it without A-MPDUs for 5 min. |
+
+```sh
+cd build && HT=1 ./run-build.sh      # -> build/out-ht/b43-stripped.ko
+# on the router, after installing the module:
+uci set wireless.radio0.htmode=HT20; uci commit wireless; wifi
+```
+
+Measured on the RT-AC1200G+ (WPA2, channel 1, 2-3 m):
+
+| Client | 802.11g | HT20 |
+|---|---|---|
+| iPhone (1 stream, A-MPDU) | 18 / 18 Mbit/s | **32–35 / 55–58** (it sends to the AP at MCS 15) |
+| Mac (2 streams, A-MPDU falls back) | 12 / 11 | 10–14 / **37–42** |
+
+`patches/mac80211/brcm-ht-test/899-…` adds test switches (not in the
+build): `txcore` (force the TX core mask), `ampdu_tx`, `ampdu_rts`,
+`ampdu_log` / `ampdu_polls` (block ack verdict log), `nphy_pctl_log`.
+`HT=1 PREPARE_ONLY=1 ./run-build.sh` only applies the patches (~1 min).
 
 ### Building `kmod-b43`
 

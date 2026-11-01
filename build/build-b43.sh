@@ -23,7 +23,11 @@ if [ ! -d package/kernel/mac80211 ]; then
 	cp -a /work/owrt/package/kernel/mac80211 package/kernel/
 fi
 # our patches: 816+ (clear stale ones first); /patches-extra = optional debug set
-rm -f package/kernel/mac80211/patches/brcm/81[6-9]-* package/kernel/mac80211/patches/brcm/8[2-4]?-b43-*
+B=package/kernel/mac80211/patches/brcm
+rm -f $B/81[6-9]-* $B/8[2-4]?-b43-* $B/8[2-6]?-wifi-b43-* $B/88?-* $B/89?-*
+# the HT set replaces OpenWrt's 813: keep the original and restore it every run
+[ -f /work/813.orig ] || cp $B/813-b43-reduce-number-of-RX-slots.patch /work/813.orig
+cp /work/813.orig $B/813-b43-reduce-number-of-RX-slots.patch
 if [ -n "${SKIP_816:-}" ]; then install -m 644 /patches/81[7-9]-*.patch package/kernel/mac80211/patches/brcm/ 2>/dev/null || true; else install -m 644 /patches/*.patch package/kernel/mac80211/patches/brcm/; fi
 if [ -d /patches-extra ]; then
 	install -m 644 /patches-extra/*.patch package/kernel/mac80211/patches/brcm/
@@ -49,6 +53,13 @@ fi
 grep -E '^CONFIG_PACKAGE_kmod-.*=m' .config
 grep -E 'B43_' .config || true
 [ -n "${CONFIG_ONLY:-}" ] && exit 0
+
+# PREPARE_ONLY=1: unpack + apply patches only (quick check for patch conflicts)
+if [ -n "${PREPARE_ONLY:-}" ]; then
+	make package/kernel/mac80211/{clean,prepare} V=s > /out/prepare.log 2>&1 \
+		|| { grep -nE "^Applying|FAILED|failed|Hunk|can.t find|Reversed" /out/prepare.log | tail -n 40; exit 1; }
+	grep -cE "^Applying" /out/prepare.log; exit 0
+fi
 
 # full log: build/out/make.log on the Mac
 make package/kernel/mac80211/{clean,compile} -j"$(nproc)" V=s > /out/make.log 2>&1 \

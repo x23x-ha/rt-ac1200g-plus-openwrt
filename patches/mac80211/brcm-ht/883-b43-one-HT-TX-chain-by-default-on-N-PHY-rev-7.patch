@@ -1,0 +1,63 @@
+From: OpenWrt RT-AC1200G+ port
+Subject: [PATCH] b43: one HT TX chain and no STBC by default on N-PHY rev 7+
+
+On a BCM43217 (N-PHY rev 17, radio 2057 rev 14, external PAs), HT
+frames sent on one chain decode fine at MCS 0-7 (35-40 Mbit/s TCP to a
+one stream client), and each chain alone sends clean OFDM. STBC frames
+of one stream fail at the receiver at any MCS (4% success at MCS 0,
+-35 dBm, Apple 2x2 client), and MCS 8-15 only partly get through.
+Until that is understood, advertise one TX stream and no TX STBC on
+N-PHY rev 7+; RX keeps two streams.
+
+ht_txchains=N (0 = auto) and ht_stbc=0/1 (-1 = auto) override this.
+
+diff --git a/drivers/net/wireless/broadcom/b43/main.c b/drivers/net/wireless/broadcom/b43/main.c
+index 5d3132e..9af7e0a 100644
+--- a/drivers/net/wireless/broadcom/b43/main.c
++++ b/drivers/net/wireless/broadcom/b43/main.c
+@@ -113,6 +113,14 @@ MODULE_PARM_DESC(btcoex, "Enable Bluetooth coexistence (default on)");
+ 
+ int b43_modparam_verbose = B43_VERBOSITY_DEFAULT;
+ module_param_named(verbose, b43_modparam_verbose, int, 0644);
++
++static int modparam_ht_txchains;
++module_param_named(ht_txchains, modparam_ht_txchains, int, 0444);
++MODULE_PARM_DESC(ht_txchains, "HT TX chains to use: 0 = auto (one on N-PHY rev 7+), 1 = one stream without STBC, 2+ = all");
++
++static int modparam_ht_stbc = -1;
++module_param_named(ht_stbc, modparam_ht_stbc, int, 0444);
++MODULE_PARM_DESC(ht_stbc, "Send STBC to stations that can receive it: -1 = auto (not on N-PHY rev 7+), 0 = never, 1 = with two or more TX chains");
+ MODULE_PARM_DESC(verbose, "Log message verbosity: 0=error, 1=warn, 2=info(default), 3=debug");
+ 
+ static int b43_modparam_pio;
+@@ -6392,11 +6400,28 @@ static void b43_ht_cap_set_chains(struct b43_wldev *dev,
+ 	u8 mask = (1 << cores) - 1;
+ 	int tx = hweight8(sprom->txchain & mask) ?: cores;
+ 	int rx = hweight8(sprom->rxchain & mask) ?: cores;
+-	int tx_ss = min(tx, 2), rx_ss = min(rx, 2);
++	int limit = modparam_ht_txchains;
++	int tx_ss, rx_ss;
++
++	/*
++	 * N-PHY rev 7+ (radio 2057, tested on BCM43217): one TX chain works at
++	 * MCS 0-7, but STBC frames fail at the receiver at any MCS and
++	 * MCS 8-15 only partly get through. Use one TX chain and no STBC
++	 * there unless asked for more.
++	 */
++	bool nphy7 = dev->phy.type == B43_PHYTYPE_N && dev->phy.rev >= 7;
++	bool stbc = modparam_ht_stbc < 0 ? !nphy7 : modparam_ht_stbc;
++
++	if (!limit && nphy7)
++		limit = 1;
++	if (limit > 0 && tx > limit)
++		tx = limit;
++	tx_ss = min(tx, 2);
++	rx_ss = min(rx, 2);
+ 
+ 	if (rx_ss >= 2)
+ 		ht_cap->mcs.rx_mask[1] = 0xff;
+-	if (tx < 2)
++	if (tx < 2 || !stbc)
+ 		ht_cap->cap &= ~IEEE80211_HT_CAP_TX_STBC;
+ 	if (tx_ss != rx_ss)
+ 		ht_cap->mcs.tx_params |= IEEE80211_HT_MCS_TX_RX_DIFF |
