@@ -30,7 +30,7 @@ jobs:
       - name: Download SDK
         run: |
           mkdir -p build/dl build/out build/images
-          chmod a+rwx build/out build/images   # containers run as uid 1000
+          mkdir -p build/out-ht; chmod a+rwx build/out build/out-ht build/images   # containers run as uid 1000
           U=https://downloads.openwrt.org/releases/$OWRT_VERSION/targets/bcm53xx/generic
           cd build/dl
           [ -f "$SDK" ] || curl -fLO "$U/$SDK"
@@ -39,21 +39,21 @@ jobs:
       - name: Build env image
         run: docker build -t owrt-sdk-env build
 
-      - name: Build kmod-b43 (816 + 818 + 819)
-        run: build/run-build.sh
+      - name: Build kmod-b43 (802.11n: PR 25922 series + 880-885)
+        run: HT=1 build/run-build.sh
 
       - name: Build images
         run: |
           pip install --user fdt
-          build/make-image.sh
-          FIRSTBOOT=1 build/make-image.sh
+          HT=1 build/make-image.sh
+          HT=1 FIRSTBOOT=1 build/make-image.sh
 
       - name: Collect
         run: |
           mkdir dist
           cp build/images/*.trx dist/
-          cp build/out/b43-stripped.ko dist/b43-$KVER.ko
-          cp build/out/kmod-b43-*.apk dist/
+          cp build/out-ht/b43-stripped.ko dist/b43-$KVER.ko
+          cp build/out-ht/kmod-b43-*.apk dist/
           cd dist && sha256sum * > sha256sums && cat sha256sums
 
       - uses: actions/upload-artifact@v4
@@ -66,5 +66,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* --prerelease --title "OpenWrt $OWRT_VERSION for RT-AC1200G+ ($GITHUB_REF_NAME)" \
-            --notes "Built by CI from ${GITHUB_SHA::7}. See the README for flashing, and verify files against sha256sums. Only flash the *asus_rt-ac1200g-plus* images on an RT-AC1200G+."
+          { echo "Built by CI from ${GITHUB_SHA::7}."; echo; cat docs/RELEASE_NOTES.md; } > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --prerelease --title "OpenWrt $OWRT_VERSION for RT-AC1200G+ ($GITHUB_REF_NAME): 802.11n" --notes-file notes.md

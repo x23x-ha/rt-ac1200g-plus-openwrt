@@ -5,7 +5,7 @@
 #   ./make-image.sh               -> build/images/openwrt-<ver>-asus_rt-ac1200g-plus-squashfs.trx
 #   FIRSTBOOT=1 ./make-image.sh   also bakes in tools/rt-ac1200g-firstboot.sh
 #                                 (takes over the stock ASUS settings, see the script)
-# Needs: Docker, build/out/b43-stripped.ko, python3 with `fdt` + liblzma >= 5.4
+# Needs: Docker, build/out[-ht]/b43-stripped.ko, python3 with `fdt` + liblzma >= 5.4
 # for tools/patch-trx-dtb.py (PYTHON=... to pick the interpreter).
 set -euo pipefail
 H=$(cd "$(dirname "$0")/.." && pwd)
@@ -13,7 +13,8 @@ V=${OWRT_VERSION:-25.12.6}
 KVER=${KVER:-6.12.112}
 URL=https://downloads.openwrt.org/releases/$V/targets/bcm53xx/generic
 IB=openwrt-imagebuilder-$V-bcm53xx-generic.Linux-x86_64.tar.zst
-KO=$H/build/out/b43-stripped.ko
+# HT=1: take the 802.11n module from build/out-ht (HT=1 ./run-build.sh)
+KO=${KO:-$H/build/out${HT:+-ht}/b43-stripped.ko}
 OUT=$H/build/images
 NAME=openwrt-$V-asus_rt-ac1200g-plus-squashfs${FIRSTBOOT:+-firstboot}.trx
 
