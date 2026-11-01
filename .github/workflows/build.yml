@@ -39,7 +39,7 @@ jobs:
       - name: Build env image
         run: docker build -t owrt-sdk-env build
 
-      - name: Build kmod-b43 (802.11n: PR 25922 series + 880-885)
+      - name: "Build kmod-b43 (802.11n: PR 25922 series + 880-885)"
         run: HT=1 build/run-build.sh
 
       - name: Build images
