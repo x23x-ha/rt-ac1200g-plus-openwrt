@@ -22,6 +22,9 @@ IB=openwrt-imagebuilder-$V-bcm53xx-generic.Linux-x86_64.tar.zst
 # HT=1: take the 802.11n module from build/out-ht (HT=1 ./run-build.sh)
 KO=${KO:-$H/build/out${HT:+-ht}/b43-stripped.ko}
 OUT=$H/build/images
+# The ImageBuilder adds LuCI only when asked (release images get it from their
+# own build config): without it there is no web interface at all.
+PACKAGES=${PACKAGES-luci}
 NAME=openwrt-$V-asus_rt-ac1200g-plus-squashfs${WL:+-wl}${FIRSTBOOT:+-firstboot}.trx
 
 [ -f "$KO" ] || { echo "missing $KO, run build/run-build.sh first"; exit 1; }
@@ -76,7 +79,7 @@ docker run --rm --platform linux/amd64 \
 	owrt-sdk-env bash -c "set -e
 		[ -d /work/ib ] || { mkdir /work/ib; tar --zstd -xf /dl/$IB -C /work/ib --strip-components=1; }
 		cd /work/ib
-		make image PROFILE=tenda_ac9 FILES=/files BIN_DIR=/out >/work/image.log 2>&1 \
+		make image PROFILE=tenda_ac9 PACKAGES=\"$PACKAGES\" FILES=/files BIN_DIR=/out >/work/image.log 2>&1 \
 			|| { tail -n 40 /work/image.log; exit 1; }
 		tail -n 3 /work/image.log"
 
