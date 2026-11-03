@@ -18,8 +18,15 @@ env:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    timeout-minutes: 340
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space (the kernel build needs ~15 GB)
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          docker image prune -af >/dev/null
+          df -h /
 
       - name: Cache downloads
         uses: actions/cache@v4
@@ -30,7 +37,8 @@ jobs:
       - name: Download SDK
         run: |
           mkdir -p build/dl build/out build/images
-          mkdir -p build/out-ht; chmod a+rwx build/out build/out-ht build/images   # containers run as uid 1000
+          mkdir -p build/out-ht build/out-kernel
+          chmod a+rwx build/out build/out-ht build/out-kernel build/images   # containers run as uid 1000
           U=https://downloads.openwrt.org/releases/$OWRT_VERSION/targets/bcm53xx/generic
           cd build/dl
           [ -f "$SDK" ] || curl -fLO "$U/$SDK"
@@ -42,11 +50,14 @@ jobs:
       - name: "Build kmod-b43 (802.11n: PR 25922 series + 880-885)"
         run: HT=1 build/run-build.sh
 
+      - name: "Build the kernel with the bgmac fix (patches/kernel, 1-2 h)"
+        run: build/build-kernel.sh
+
       - name: Build images
         run: |
           pip install --user fdt
-          HT=1 build/make-image.sh
-          HT=1 FIRSTBOOT=1 build/make-image.sh
+          HT=1 ZIMAGE=build/out-kernel/zImage build/make-image.sh
+          HT=1 ZIMAGE=build/out-kernel/zImage FIRSTBOOT=1 build/make-image.sh
 
       - name: Collect
         run: |
@@ -54,6 +65,7 @@ jobs:
           cp build/images/*.trx dist/
           cp build/out-ht/b43-stripped.ko dist/b43-$KVER.ko
           cp build/out-ht/kmod-b43-*.apk dist/
+          cp build/out-kernel/zImage dist/zImage-$KVER-bgmac64
           cd dist && sha256sum * > sha256sums && cat sha256sums
 
       - uses: actions/upload-artifact@v4
