@@ -42,6 +42,14 @@ if [ ! -f .config.done ]; then
 	make defconfig >/dev/null
 	touch .config.done
 fi
+# sources from the OpenWrt mirror first: some upstream sites (sourceware.org) crawl
+# at a few hundred bytes/s from some networks, and a slow download never fails
+# over to the mirror on its own
+if ! grep -q "^CONFIG_LOCALMIRROR=\"https://sources.cdn.openwrt.org\"" .config; then
+	sed -i "/CONFIG_LOCALMIRROR/d" .config
+	echo "CONFIG_LOCALMIRROR=\"https://sources.cdn.openwrt.org\"" >> .config
+	make defconfig >/dev/null
+fi
 for p in /kpatches/*.patch; do
 	cp "$p" target/linux/bcm53xx/patches-6.12/
 	echo "patch: $(basename "$p")"
