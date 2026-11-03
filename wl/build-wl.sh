@@ -68,7 +68,8 @@ python3 -c "import zipfile,sys
 z=zipfile.ZipFile(\"/in/stock.zip\")
 b=[n for n in z.namelist() if n.endswith(\".bin\")]
 open(sys.argv[1],\"wb\").write(z.read(b[0]))" $T/stock.bin
-mkdir -p $T/bin && ln -s /work/sdk/staging_dir/host/bin/unsquashfs4 $T/bin/unsquashfs  # the SDK has one
+# the SDK has one; it is a wrapper that finds its loader relative to itself, so call it, do not symlink it
+mkdir -p $T/bin && printf "#!/bin/sh\nexec /work/sdk/staging_dir/host/bin/unsquashfs4 \"\$@\"\n" > $T/bin/unsquashfs && chmod +x $T/bin/unsquashfs
 cd $T && PATH=$T/bin:$PATH bash /extract.sh $T/stock.bin /out/wlut.tgz >/dev/null
 '
 cd "$OUT" && ls -l wl.ko wlut.tgz && shasum -a 256 wl.ko wlut.tgz
