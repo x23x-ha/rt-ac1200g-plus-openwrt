@@ -25,6 +25,10 @@ OUT=$H/build/images
 NAME=openwrt-$V-asus_rt-ac1200g-plus-squashfs${WL:+-wl}${FIRSTBOOT:+-firstboot}.trx
 
 [ -f "$KO" ] || { echo "missing $KO, run build/run-build.sh first"; exit 1; }
+if [ -n "${ZIMAGE:-}" ]; then   # absolute: the script changes directory below
+	[ -f "$ZIMAGE" ] || { echo "missing $ZIMAGE (ZIMAGE=)"; exit 1; }
+	ZIMAGE=$(cd "$(dirname "$ZIMAGE")" && pwd)/$(basename "$ZIMAGE")
+fi
 WLO=$H/build/out-wl
 if [ -n "${WL:-}" ]; then
 	for f in "$WLO/wl.ko" "$WLO/wlut.tgz"; do
