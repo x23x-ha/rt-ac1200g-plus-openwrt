@@ -286,8 +286,13 @@ function setup_vif(section, icfg, dcfg) {
 		wl_cmd('nmode', '1');
 		if (!g2)
 			wl_cmd('vhtmode', substr(ht, 0, 3) == 'VHT' ? '1' : '0');
+		/* wl names a 2.4 GHz 40 MHz channel by its control channel plus the
+		 * side it sits on: "1l" = control 1, the 20 MHz above it added. The
+		 * 2.4 GHz bandwidth cap is 20 MHz only until bw_cap allows 40 (3). */
+		if (g2)
+			wl_cmd('bw_cap', `2g ${bw == '40' ? 3 : 1}`);
 		if (bw != '20')
-			spec = g2 ? `${chan}/${bw}${+chan <= 7 ? 'u' : 'l'}` : `${chan}/${bw}`;
+			spec = g2 ? `${chan}${+chan <= 7 ? 'l' : 'u'}` : `${chan}/${bw}`;
 	}
 	log(`wl: ${IFACE} htmode=${ht} chanspec=${spec}`);
 	/* Packet chaining must stay on: with pktc 0 the A-MPDU transmit path
