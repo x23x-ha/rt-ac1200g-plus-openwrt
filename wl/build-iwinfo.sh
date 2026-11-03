@@ -8,7 +8,7 @@
 #   wl/build-iwinfo.sh   -> build/out-iwinfo/libiwinfo.so.20230701
 #
 # Needs Docker and the SDK volume from build/run-build.sh. Downloads the base
-# feed (OpenWrt git) on the first run.
+# feed (git.openwrt.org) on the first run.
 set -euo pipefail
 H=$(cd "$(dirname "$0")/.." && pwd)
 OUT=$H/build/out-iwinfo
@@ -23,13 +23,17 @@ docker run --rm --platform linux/amd64 \
 	owrt-sdk-env bash -c '
 set -euo pipefail
 cd /work/sdk
+./scripts/feeds update base >/work/iwinfo-feeds.log 2>&1
+grep -q "$BASE" feeds.conf.default || { echo "!! SDK base feed is not $BASE" >&2; exit 1; }
+# the package from the base feed (same commit as the release), as a local copy
+# (Makefile + the OpenWrt patch 100-multi_radio; ours goes on top as 200)
 D=package/iwinfo
+rm -rf $D
+cp -r feeds/base/network/utils/iwinfo $D
 mkdir -p $D/patches
-curl -fsSL -o $D/Makefile https://raw.githubusercontent.com/openwrt/openwrt/$BASE/package/network/utils/iwinfo/Makefile
 sed -i "s/BACKENDS=\"nl80211\"/BACKENDS=\"nl80211 wl\"/" $D/Makefile
 grep -q "BACKENDS=\"nl80211 wl\"" $D/Makefile
 cp /p/200-wl-backend-fixes.patch $D/patches/
-./scripts/feeds update base >/work/iwinfo-feeds.log 2>&1
 ./scripts/feeds install libjson-c libnl-tiny libubox uci ubus lua >>/work/iwinfo-feeds.log 2>&1
 make defconfig >/dev/null
 for p in libjson-c libnl-tiny libubox uci ubus lua iwinfo; do

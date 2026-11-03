@@ -29,7 +29,7 @@ docker run --rm --platform linux/amd64 \
 set -euo pipefail
 cd /work
 if [ ! -d openwrt ]; then
-	git clone -q --branch v$V --depth 1 https://github.com/openwrt/openwrt.git openwrt
+	git clone -q --branch v$V --depth 1 https://git.openwrt.org/openwrt/openwrt.git openwrt
 fi
 cd openwrt
 git describe --tags 2>/dev/null || true
