@@ -1,0 +1,33 @@
+#!/bin/sh /etc/rc.common
+# Boot-loop guard for the wl blob (both radios run on it).
+#
+# Runs before the network comes up. If any radio driven by the blob (type
+# broadcom) is enabled, it marks the boot as pending; rc.local clears the
+# mark once the box has survived 150s. If a boot finds the mark still there,
+# the last boot never got that far - so disable every blob radio rather than
+# loop forever. Costs at most one failed boot.
+
+START=11
+
+wl_radios() {
+	uci -q show wireless | sed -n "s/^wireless\.\([^.=]*\)\.type='broadcom'$/\1/p"
+}
+
+start() {
+	if [ -f /etc/wl-boot-pending ]; then
+		rm -f /etc/wl-boot-pending
+		for r in $(wl_radios); do
+			uci set wireless.$r.disabled=1
+		done
+		uci commit wireless
+		logger -t wl-guard "previous boot with the wl radios did not survive - disabled: $(wl_radios | tr '\n' ' ')"
+	else
+		for r in $(wl_radios); do
+			if [ "$(uci -q get wireless.$r.disabled)" != 1 ]; then
+				touch /etc/wl-boot-pending
+				sync
+				break
+			fi
+		done
+	fi
+}

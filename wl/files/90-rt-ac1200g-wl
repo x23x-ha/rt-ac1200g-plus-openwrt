@@ -1,0 +1,67 @@
+#!/bin/sh
+# uci-defaults (runs once after flashing): 5 GHz and 2.4 GHz on the Broadcom wl blob.
+# The module and tools are in the image (/usr/lib/wl); this only adds config.
+# Never overwrites an existing radio1, never sets a key.
+
+# wl-guard marks a boot with an enabled wl radio as pending; rc.local clears
+# the mark once the box has stayed up 150 s (see /etc/init.d/wl-guard).
+grep -q wl-boot-pending /etc/rc.local 2>/dev/null || \
+	sed -i '/^exit 0/i ( sleep 150; rm -f /etc/wl-boot-pending; sync ) \&' /etc/rc.local
+
+# 5 GHz radio, added DISABLED: set ssid/key, then enable it
+#   uci set wireless.default_radio1.key='...'; uci set wireless.radio1.disabled=0
+#   uci commit wireless; wifi
+if ! uci -q get wireless.radio1 >/dev/null; then
+	uci set wireless.radio1=wifi-device
+	uci set wireless.radio1.type=broadcom
+	uci set wireless.radio1.band=5g
+	uci set wireless.radio1.channel=36
+	uci set wireless.radio1.htmode=VHT80
+	# no 'country' here: wifi-scripts share one country across all radios and
+	# hostapd (radio0, b43) rejects 'E0/943'; wl-driver.uc defaults to E0/943.
+	uci set wireless.radio1.disabled=1
+	uci set wireless.default_radio1=wifi-iface
+	uci set wireless.default_radio1.device=radio1
+	uci set wireless.default_radio1.network=lan
+	uci set wireless.default_radio1.mode=ap
+	uci set wireless.default_radio1.ssid='ASUS-5G'
+	uci set wireless.default_radio1.encryption='psk2+ccmp'
+	# netifd turns on bridge hairpin with this set; the blob's L2 update frame
+	# then disassociates every client (Archer WL.md blocker 2)
+	uci set wireless.default_radio1.multicast_to_unicast=0
+	uci commit wireless
+fi
+
+# 2.4 GHz on the blob too (2026-11-03: 2-3x b43's throughput here). Runs after
+# every flash, so it only converts a b43 radio0; set wireless.radio0.keep_b43=1
+# to stay on b43. b43 itself is not loaded (the image ships /etc/modules.d/b43
+# without the module name), so no b43 radio is detected and none shows in LuCI.
+# (Until 2026-11-03 a disabled "b43_parked" wifi-device held the path instead.)
+uci -q delete wireless.b43_parked && uci commit wireless
+if [ "$(uci -q get wireless.radio0.keep_b43)" = 1 ]; then
+	echo b43 > /etc/modules.d/b43	# b43 loads from the next boot on
+fi
+if [ "$(uci -q get wireless.radio0.keep_b43)" != 1 ] &&
+   [ "$(uci -q get wireless.radio0.type)" != broadcom ]; then
+	if ! uci -q get wireless.radio0 >/dev/null; then
+		uci set wireless.radio0=wifi-device
+		uci set wireless.radio0.band=2g
+		uci set wireless.radio0.channel=1
+		uci set wireless.default_radio0=wifi-iface
+		uci set wireless.default_radio0.device=radio0
+		uci set wireless.default_radio0.network=lan
+		uci set wireless.default_radio0.mode=ap
+		uci set wireless.default_radio0.ssid='ASUS'
+		uci set wireless.default_radio0.encryption='psk2+ccmp'
+		uci set wireless.radio0.disabled=1	# no key yet: enable after setting one
+	fi
+	uci set wireless.radio0.type=broadcom
+	uci -q delete wireless.radio0.path
+	uci set wireless.radio0.htmode=HT20
+	# hairpin off: same L2-update disassociation as on 5 GHz
+	uci set wireless.default_radio0.multicast_to_unicast=0
+	uci commit wireless
+fi
+
+/etc/init.d/wl-guard enable
+exit 0

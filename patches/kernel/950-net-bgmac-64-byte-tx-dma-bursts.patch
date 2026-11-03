@@ -1,0 +1,30 @@
+From: bs <bs@asusrt-ac1200g-plus>
+Date: Wed, 3 Nov 2026 00:00:00 +0000
+Subject: [PATCH] net: bgmac: use 64-byte TX DMA bursts on BCM53573
+
+BCM53573 has a hardware erratum (BCM53573 erratum #bgmac-tx128): when the
+GMAC core's rev 8 BGMAC_FEAT_TX_MASK_SETUP is present, 128-byte TX bursts
+corrupt 0.1-4 % of frames under heavy forwarding (400-900 Mbit/s). Fix
+by selecting 64-byte bursts (BGMAC_DMA_TX_BL_64) instead of the default
+128-byte value.
+
+Cf. third_party/archer-c1200-v2-openwrt/openwrt/patches-6.12/323-*.
+
+Signed-off-by: bs <bs@asusrt-ac1200g-plus>
+---
+ drivers/net/ethernet/broadcom/bgmac.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+--- a/drivers/net/ethernet/broadcom/bgmac.c
++++ b/drivers/net/ethernet/broadcom/bgmac.c
+@@ -92,7 +92,9 @@ static void bgmac_dma_tx_enable(struct bg
+ 	ctl = bgmac_read(bgmac, ring->mmio_base + BGMAC_DMA_TX_CTL);
+ 	if (bgmac->feature_flags & BGMAC_FEAT_TX_MASK_SETUP) {
+ 		ctl &= ~BGMAC_DMA_TX_BL_MASK;
+-		ctl |= BGMAC_DMA_TX_BL_128 << BGMAC_DMA_TX_BL_SHIFT;
++		/* BCM53573 erratum: 128-byte bursts corrupt frames under load
++		 * (cf. archer-c1200-v2-openwrt patches-6.12/323-*) */
++		ctl |= BGMAC_DMA_TX_BL_64 << BGMAC_DMA_TX_BL_SHIFT;
+ 
+ 		ctl &= ~BGMAC_DMA_TX_MR_MASK;
+ 		ctl |= BGMAC_DMA_TX_MR_2 << BGMAC_DMA_TX_MR_SHIFT;

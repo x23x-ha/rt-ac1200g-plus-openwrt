@@ -27,10 +27,12 @@ LZMA1 properties as OpenWrt's lzma-d16 (header with known size, no end marker),
 and everything from the rootfs offset on is kept byte-for-byte. Fails if the new
 kernel would no longer fit before the original rootfs offset.
 
-Usage: patch-trx-dtb.py tenda_ac9-squashfs.trx out.trx
+Usage: patch-trx-dtb.py input.trx output.trx
+       patch-trx-dtb.py --zimage NEW_ZIMAGE input.trx output.trx
 Needs: python3, `pip install fdt`, liblzma >= 5.4 (Linux: liblzma.so.5;
 macOS: Homebrew xz). Verifies its own output before exiting.
 """
+import argparse
 import ctypes
 import ctypes.util
 import hashlib
@@ -204,22 +206,36 @@ def patch_board(t):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) == 3:
+        args = argparse.Namespace(zimage=None, src=sys.argv[1], dst=sys.argv[2])
+    elif len(sys.argv) == 5 and sys.argv[1] == "--zimage":
+        args = argparse.Namespace(zimage=sys.argv[2], src=sys.argv[3], dst=sys.argv[4])
+    else:
         sys.exit(__doc__)
-    src, dst = sys.argv[1], sys.argv[2]
-    d = open(src, "rb").read()
+    d = open(args.src, "rb").read()
     ver, o0, o1 = parse_trx(d)
     zimage, dtb, (lc, lp, pb, dict_size) = split_kernel(d[o0:o1])
+
+    # Use provided zImage if --zimage was given
+    if args.zimage:
+        zimage = open(args.zimage, "rb").read()
+        print(f"Replaced zImage: {len(zimage)} bytes (from {args.zimage})")
 
     t = fdt.parse_dtb(dtb)
     model = t.get_property("model").value
     if model == MODEL:
-        sys.exit("DTB already patched")
-    if model != "Tenda AC9":
+        # DTB already patched — only zImage replacement needed
+        if args.zimage:
+            print("DTB already patched, skipping DTB patch (zImage replacement only)")
+            new_dtb = dtb
+        else:
+            sys.exit("DTB already patched")
+    elif model != "Tenda AC9":
         sys.exit(f"input DTB model is {model!r}, expected 'Tenda AC9'")
-    patch_ports(t)
-    patch_board(t)
-    new_dtb = t.to_dtb(version=17)
+    else:
+        patch_ports(t)
+        patch_board(t)
+        new_dtb = t.to_dtb(version=17)
 
     new_k = lzma_alone(zimage + new_dtb, lc, lp, pb, dict_size)
     kpad = (-(28 + len(new_k))) % 1024
@@ -240,8 +256,8 @@ def main():
     assert t2.get_property("compatible").data[0] == "tenda,ac9"
     assert t2.get_node(USB).get_property("vcc-gpios").data[1:] == [8, 0]
 
-    open(dst, "wb").write(img)
-    print(f"{dst}: {len(img)} bytes, sha256 {hashlib.sha256(img).hexdigest()}")
+    open(args.dst, "wb").write(img)
+    print(f"{args.dst}: {len(img)} bytes, sha256 {hashlib.sha256(img).hexdigest()}")
 
 
 if __name__ == "__main__":

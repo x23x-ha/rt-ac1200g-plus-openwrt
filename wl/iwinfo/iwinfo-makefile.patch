@@ -1,0 +1,13 @@
+diff --git a/package/network/utils/iwinfo/Makefile b/package/network/utils/iwinfo/Makefile
+index a809d4c..d8db381 100644
+--- a/package/network/utils/iwinfo/Makefile
++++ b/package/network/utils/iwinfo/Makefile
+@@ -83,7 +83,7 @@ MAKE_FLAGS += \
+ 	FPIC="$(FPIC)" \
+ 	CFLAGS="$(TARGET_CFLAGS) $(TARGET_CPPFLAGS)" \
+ 	LDFLAGS="$(TARGET_LDFLAGS)" \
+-	BACKENDS="nl80211" \
++	BACKENDS="nl80211 wl" \
+ 	SOVERSION="$(IWINFO_ABI_VERSION)"
+ 
+ define Build/InstallDev
