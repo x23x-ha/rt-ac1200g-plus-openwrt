@@ -35,7 +35,8 @@ RT-AC1200G+.
   client without A-MPDUs (kernel log: `… A-MPDUs without block ack, sending
   without A-MPDUs for 300 s`). A Mac then downloads at about the 802.11g rate
   (10-14 Mbit/s here), uploads still gain (37-42 Mbit/s). Every 5 minutes the
-  driver tries A-MPDUs again, which costs a few seconds. Tune or disable with
+  driver tries A-MPDUs again, which costs a few seconds; for a client that
+  keeps failing the pause doubles each time, up to 40 minutes (patch 887). Tune or disable with
   the `b43` module parameter `ampdu_noba_pct` (default 35, 0 = never fall
   back).
 - **macOS AWDL** (AirDrop, Handoff, Universal Control, AirPlay Receiver) takes
@@ -43,8 +44,9 @@ RT-AC1200G+.
   third of its throughput to any 2.4 GHz access point. Turning those off
   helps; `sudo ifconfig awdl0 down` until the next reboot.
 - **No two-stream TX, no STBC, no 40 MHz:** the router sends one stream (MCS
-  0-7) and receives two (MCS 0-15). Sending on both chains fails on this radio
-  and is off by default (`ht_txchains`, `ht_stbc` to experiment).
+  0-7) and receives two (MCS 0-15). Sending on both chains (`ht_txchains=2`)
+  now connects at MCS 13-15, but more frames fail and a Mac downloaded less
+  (3 vs 8 Mbit/s), so it stays off by default (`ht_stbc` to experiment too).
 - 5 GHz: no open driver (see `wl/README.md`).
 
 ## Rolling back to 802.11g
