@@ -27,7 +27,7 @@ if [ -n "${SKIP_816:-}" ]; then   # stock tables + debug: build/out-debug-stock/
 	OUT=$H/build/out-debug-stock
 	EXTRA+=(-e SKIP_816=1)
 fi
-mkdir -p "$OUT"
+mkdir -p "$OUT" "$H/build/dl"   # before Docker mounts it (else Docker creates it as root)
 docker run --rm --platform linux/amd64 \
 	-v owrt-sdk-25126:/work \
 	-v "$H/build/dl:/dl:ro" \
