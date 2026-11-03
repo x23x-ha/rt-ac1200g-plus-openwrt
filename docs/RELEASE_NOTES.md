@@ -1,8 +1,9 @@
 OpenWrt 25.12.6 for the ASUS RT-AC1200G+, with **802.11n (HT20) on 2.4 GHz**.
 
-**Pre-release:** tested on one router. The images have not yet been tested
-from a fresh install; see the README for flashing and recovery, and verify the
-files against `sha256sums`. Only flash the `asus_rt-ac1200g-plus` images on an
+**Pre-release:** tested on one router: fresh install with defaults (LuCI, LAN,
+2.4 GHz WPA2, USB, LEDs), sysupgrade with settings kept, reset button, CFE
+rescue, back to stock and back to OpenWrt. See the README for flashing and
+recovery, and verify the files against `sha256sums`. Only flash the `asus_rt-ac1200g-plus` images on an
 RT-AC1200G+.
 
 ## What's new

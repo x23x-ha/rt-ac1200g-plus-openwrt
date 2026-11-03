@@ -109,11 +109,21 @@ The stock web UI refuses OpenWrt images. Instead:
 > you without Ethernet. Always patch first, then `sysupgrade`.
 > Never write `boot` (CFE) or `nvram`.
 
-**Recovery:** CFE has a rescue mode.
+**Recovery:** CFE has a rescue mode (tested: OpenWrt → stock and back).
 
-1. Hold reset while powering on.
-2. Set a wired PC to 192.168.1.10/24.
-3. `tftp` (binary) a *patched* `.trx` to 192.168.1.1.
+1. Unplug power, hold reset, plug power in, keep holding ~10 s until the
+   power LED blinks slowly, release.
+2. The bootloader listens on **the LAN IP the stock firmware last had** (its
+   nvram `lan_ipaddr`): 192.168.1.1 on a router that was never configured,
+   otherwise whatever you set in Asuswrt. OpenWrt never changes it. Set a wired
+   computer to an address in that subnet (e.g. 192.168.1.10/24), any LAN port.
+3. `tftp` (binary) a *patched* `.trx` or the stock ASUS `.trx` to that IP, or
+   upload it on the "CFE miniWeb Server" page at http://<that IP>/.
+
+**Back to stock:** the rescue mode with the stock `.trx` from asus.com.
+Firmware flashes never touch nvram, so the stock settings (admin password,
+LAN IP, SSIDs) come back as they were before OpenWrt. From stock back to
+OpenWrt: rescue mode again, or `mtd-write2 <file> linux` over stock SSH.
 
 ### Kernel-only update (keeps the overlay)
 
