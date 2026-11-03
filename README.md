@@ -15,10 +15,18 @@ What works:
 
 What doesn't:
 
-- **5 GHz:** the 802.11ac core inside the SoC has no Linux driver.
+- **5 GHz:** the 802.11ac core inside the SoC has no open Linux driver. It does
+  work with Broadcom's own `wl` driver, which you build yourself from TP-Link's
+  downloads (nothing closed is in this repo): see [wl/README.md](wl/README.md).
+  That image also moves 2.4 GHz to `wl` (about twice b43's speed).
 - **2.4 GHz extras:** sending two streams or STBC fails on this radio, and
   some clients (seen with an Apple Mac) lose A-MPDUs to the firmware. The HT
   build works around both (see below).
+
+- **Forwarded traffic** with OpenWrt's kernel: the SoC's gmac corrupts some
+  forwarded frames (UDP checksum errors, truncated packets; worst for Wi-Fi
+  uploads). `build/build-kernel.sh` builds the kernel with the fix (64-byte TX
+  DMA bursts); use it with `ZIMAGE=build/out-kernel/zImage build/make-image.sh`.
 
 Status: tested on one hardware rev A unit. Use at your own risk.
 
@@ -44,6 +52,10 @@ Take a ready image from [Releases](../../releases). Each release has two:
   2.4 GHz SSID/key, LAN IP, WAN MAC, and the root password from the ASUS admin
   password. It opens SSH/LuCI on WAN for private source IPs, which is meant for
   use behind another router. See `tools/rt-ac1200g-firstboot.sh`.
+
+**Images up to v25.12.6-2 have no web interface** (LuCI was not included); use
+SSH (`ssh root@192.168.1.1`), or build an image with the current scripts, which
+add LuCI.
 
 To flash, see [Flashing from stock firmware](#flashing-from-stock-firmware).
 Then connect a cable to a LAN port and go to http://192.168.1.1. Set a root
