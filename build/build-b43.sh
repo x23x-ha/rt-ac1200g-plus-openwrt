@@ -52,6 +52,14 @@ if [ ! -f .config.min ]; then
 fi
 # b43 firmware: 784.2 (broadcom-wl 6.30.163.46) with FW630=1, else OpenWrt's 666.2 default
 if [ -n "${FW630:-}" ]; then
+	# not on OpenWrt's mirrors and lwfinger.com is gone: fetch it from the b43-firmware
+	# project on SourceForge (as OpenWrt PR 25922 does), same hash as 25.12's broadcom.mk
+	FWT=dl/broadcom-wl-6.30.163.46.tar.bz2
+	if [ ! -f "$FWT" ]; then
+		curl -fsSL --retry 3 -o "$FWT.tmp" https://downloads.sourceforge.net/project/b43-firmware/broadcom-wl-6.30.163.46.tar.bz2
+		echo "a07c3b6b277833c7dbe61daa511f908cd66c5e2763eb7a0859abc36cd9335c2d  $FWT.tmp" | sha256sum -c -
+		mv "$FWT.tmp" "$FWT"
+	fi
 	sed -i -e 's/^CONFIG_B43_FW_5_100_138=y/# CONFIG_B43_FW_5_100_138 is not set/' \
 		-e 's/^# CONFIG_B43_FW_6_30 is not set/CONFIG_B43_FW_6_30=y/' .config
 else
