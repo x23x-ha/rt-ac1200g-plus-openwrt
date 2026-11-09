@@ -6,7 +6,29 @@ rescue, back to stock and back to OpenWrt. See the README for flashing and
 recovery, and verify the files against `sha256sums`. Only flash the `asus_rt-ac1200g-plus` images on an
 RT-AC1200G+.
 
-## What's new
+## What's new in v25.12.6-4
+
+- **New 2.4 GHz driver patches: two streams and A-MPDU now work.** The b43 set
+  is now OpenWrt PR #25922 at 1e3c416ee5, which includes Ville Takio's
+  BCM43217 fixes (2.4 GHz external PA gain table, RX gain control, external
+  PAs enabled after a cold power-on, TSSI routing, RX and TX I/Q calibration),
+  plus his 880/881 (64 KiB A-MPDU receive, 64-frame block ack window). This
+  board's own workarounds (one TX stream, per-station A-MPDU fallback) are
+  gone: the problems they hid no longer show up.
+- **Firmware 784.2** (broadcom-wl 6.30.163.46) for the 2.4 GHz chip, as in the PR.
+- Measured on the author's router after a cold power-on, channel 1 HT20, WPA2,
+  clients a few metres away, down / up Mbit/s, best of three runs:
+
+  | Client | v25.12.6-3 | v25.12.6-4 | `wl` driver |
+  |---|---|---|---|
+  | iPhone (2x2) | 32-35 / 55-58 | 63 / 49 | 66 / 85 |
+  | Mac (2x2) | 10-14 / 37-42 | 58 / 51 | not measured |
+  | Windows laptop, Intel (1 stream) | ~20 / 24 | 40 / 37 | 49-52 / 36-43 |
+
+  The router now sends MCS 15 to two-stream clients. The module was tested
+  on the running router, not yet by a fresh install of these images.
+
+## Earlier changes
 
 - **LuCI is included.** Images up to v25.12.6-2 had no web interface at all.
 - **Kernel with the bgmac fix** (`patches/kernel/950-…`, 64-byte TX DMA bursts):
@@ -16,38 +38,19 @@ RT-AC1200G+.
   `zImage` is attached; source: OpenWrt v25.12.6 + that patch.
 - **5 GHz is possible**, with Broadcom's `wl` driver built from your own TP-Link
   downloads (not in these images: it may not be redistributed). See
-  `wl/README.md`. That image also moves 2.4 GHz to `wl`: 152/211 Mbit/s on
-  5 GHz, 66/85 on 2.4 GHz (iPhone).
-- 2.4 GHz runs as 802.11n HT20: the b43 HT series from OpenWrt PR #25922,
-  rebased onto this release, plus this board's fixes (external PA, gain table,
-  TSSI power control, one TX stream on N-PHY rev 7+, per-station A-MPDU
-  fallback). `htmode` defaults to HT20 on a fresh install.
-- Measured with an iPhone at 2-3 m: 32-35 Mbit/s down / 55-58 up, against
-  18/18 on 802.11g.
+  `wl/README.md`. That image also moves 2.4 GHz to `wl`.
 
 ## Known problems
 
-- **Downloads to many clients gain little from 802.11n.** The Wi-Fi firmware
-  ignores a large share of the block acks clients send for A-MPDUs: about a
-  third for an Apple Mac, half or more for an Intel Windows laptop, ~20-40 % for
-  an iPhone. The block acks arrive on time and are well formed (the `wl` driver
-  on the same radio has no such problem), and newer firmware
-  (784.2) does the same. The driver detects this per client and sends to that
-  client without A-MPDUs (kernel log: `… A-MPDUs without block ack, sending
-  without A-MPDUs for 300 s`). A Mac then downloads at about the 802.11g rate
-  (10-14 Mbit/s here), uploads still gain (37-42 Mbit/s). Every 5 minutes the
-  driver tries A-MPDUs again, which costs a few seconds; for a client that
-  keeps failing the pause doubles each time, up to 40 minutes (patch 887). Tune or disable with
-  the `b43` module parameter `ampdu_noba_pct` (default 35, 0 = never fall
-  back).
+- **iPhone upload** is still well below `wl` (49 vs 85 Mbit/s), and the
+  Intel laptop's download about 20 % below.
+- The first speed test after a client connects is often slow (15-26 Mbit/s);
+  the next runs are not.
 - **macOS AWDL** (AirDrop, Handoff, Universal Control, AirPlay Receiver) takes
-  the Mac's Wi-Fi off the channel several times a second and costs another
-  third of its throughput to any 2.4 GHz access point. Turning those off
-  helps; `sudo ifconfig awdl0 down` until the next reboot.
-- **No two-stream TX, no STBC, no 40 MHz:** the router sends one stream (MCS
-  0-7) and receives two (MCS 0-15). Sending on both chains (`ht_txchains=2`)
-  now connects at MCS 13-15, but more frames fail and a Mac downloaded less
-  (3 vs 8 Mbit/s), so it stays off by default (`ht_stbc` to experiment too).
+  the Mac's Wi-Fi off the channel several times a second and costs a share of
+  its throughput to any 2.4 GHz access point. `sudo ifconfig awdl0 down` until
+  the next reboot.
+- No 40 MHz on 2.4 GHz.
 - 5 GHz: no open driver (see `wl/README.md`).
 
 ## Rolling back to 802.11g

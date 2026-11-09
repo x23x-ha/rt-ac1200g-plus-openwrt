@@ -24,15 +24,15 @@ if [ ! -d package/kernel/mac80211 ]; then
 fi
 # our patches: 816+ (clear stale ones first); /patches-extra = optional debug set
 B=package/kernel/mac80211/patches/brcm
-rm -f $B/81[6-9]-* $B/8[2-4]?-b43-* $B/8[2-6]?-wifi-b43-* $B/88?-* $B/89?-*
-# the HT set replaces OpenWrt's 813: keep the original and restore it every run
-[ -f /work/813.orig ] || cp $B/813-b43-reduce-number-of-RX-slots.patch /work/813.orig
-cp /work/813.orig $B/813-b43-reduce-number-of-RX-slots.patch
+# reset the patch dir to the pristine 25.12.6 one (drops every earlier set,
+# restores OpenWrt's own 813 that the HT sets replace)
+rm -rf "$B"
+cp -a /work/owrt/package/kernel/mac80211/patches/brcm "$B"
 if [ -n "${SKIP_816:-}" ]; then install -m 644 /patches/81[7-9]-*.patch package/kernel/mac80211/patches/brcm/ 2>/dev/null || true; else install -m 644 /patches/*.patch package/kernel/mac80211/patches/brcm/; fi
 if [ -d /patches-extra ]; then
 	install -m 644 /patches-extra/*.patch package/kernel/mac80211/patches/brcm/
 fi
-ls package/kernel/mac80211/patches/brcm/ | grep -E '^8(1[6-9]|[2-4][0-9])-'
+ls package/kernel/mac80211/patches/brcm/ | grep -E '^8(1[3-9]|[2-8][0-9])-'
 
 if [ ! -f .config.min ]; then
 	# SDK Config-build.in declares every package the release built as a
@@ -49,6 +49,14 @@ if [ ! -f .config.min ]; then
 		'# CONFIG_ALL_NONSHARED is not set' 'CONFIG_PACKAGE_kmod-b43=m' > .config
 	make defconfig >/dev/null
 	touch .config.min
+fi
+# b43 firmware: 784.2 (broadcom-wl 6.30.163.46) with FW630=1, else OpenWrt's 666.2 default
+if [ -n "${FW630:-}" ]; then
+	sed -i -e 's/^CONFIG_B43_FW_5_100_138=y/# CONFIG_B43_FW_5_100_138 is not set/' \
+		-e 's/^# CONFIG_B43_FW_6_30 is not set/CONFIG_B43_FW_6_30=y/' .config
+else
+	sed -i -e 's/^# CONFIG_B43_FW_5_100_138 is not set/CONFIG_B43_FW_5_100_138=y/' \
+		-e 's/^CONFIG_B43_FW_6_30=y/# CONFIG_B43_FW_6_30 is not set/' .config
 fi
 grep -E '^CONFIG_PACKAGE_kmod-.*=m' .config
 grep -E 'B43_' .config || true

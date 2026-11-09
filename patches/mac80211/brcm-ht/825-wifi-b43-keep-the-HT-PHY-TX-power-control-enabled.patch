@@ -1,7 +1,7 @@
-From c4f70386e34856afd29a7762fccf394a4e815817 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Rosen Penev <rosenp@gmail.com>
 Date: Sat, 17 Oct 2026 21:12:05 -0700
-Subject: [PATCH 825/846] wifi: b43: keep the HT-PHY TX power control enabled
+Subject: [PATCH] wifi: b43: keep the HT-PHY TX power control enabled
 
 b43_phy_ht_tx_power_ctl() enables the TX power control by setting the
 enable bits in TXPCTL_CMD_C1, then writes the saved TX power index of
@@ -22,8 +22,6 @@ TX power control status registers report 19-20.3 dBm at gain indices
 Fixes: 60e8fb9233e1 ("b43: HT-PHY: implement controlling TX power control")
 Signed-off-by: Rosen Penev <rosenp@gmail.com>
 ---
- drivers/net/wireless/broadcom/b43/phy_ht.c | 13 ++++++++++---
- 1 file changed, 10 insertions(+), 3 deletions(-)
 diff --git a/drivers/net/wireless/broadcom/b43/phy_ht.c b/drivers/net/wireless/broadcom/b43/phy_ht.c
 index 5129cda..9dc2559 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_ht.c

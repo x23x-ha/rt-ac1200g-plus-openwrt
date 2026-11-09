@@ -1,8 +1,8 @@
-From 41f1f08128ee708b692a00a1f497e7f25e8762fc Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Rosen Penev <rosenp@gmail.com>
 Date: Thu, 15 Oct 2026 23:19:12 -0700
-Subject: [PATCH 823/846] wifi: b43: keep the N-PHY TX power control from
- drifting while idle
+Subject: [PATCH] wifi: b43: keep the N-PHY TX power control from drifting
+ while idle
 
 On N-PHY rev 3 and later, the hardware TX power control moves the base
 gain index of each core according to the power it estimates for the
@@ -11,12 +11,12 @@ stepping on them with the last one. An access point with no traffic
 only sends CCK beacons, and when the last estimate is below the target,
 each beacon adds gain.
 
-On an ASUS RT-N16 (N-PHY rev 5, external PAs), both cores sit at base
-index 76-79 while OFDM frames go out, and walk down to index 0, maximum
-gain, within 20 s (core 2) and 60 s (core 1) after traffic stops, with
-the estimates frozen at 71 and 73 against a target of 74. The OFDM
-frames sent after that overdrive the PAs, so the higher rates fail
-until the loop has caught up: after 45 s of idle, only 2 of 8 pings
+On an ASUS RT-N16 (N-PHY rev 5, external PAs), both cores sit at a
+base index of 76-79 while OFDM frames go out, and walk down to index 0,
+maximum gain, within 20 s (core 2) and 60 s (core 1) after traffic
+stops, with the estimates frozen at 71 and 73 against a target of 74.
+The OFDM frames sent after that overdrive the PAs, so the higher rates
+fail until the loop has caught up: after 45 s of idle, only 2 of 8 pings
 to an 802.11g station got through.
 
 Remember the base indices while OFDM frames are being sent, and when
@@ -35,10 +35,6 @@ pings after them get through. Throughput is unchanged.
 Fixes: c7d643103508 ("b43: N-PHY: determine various PHY params")
 Signed-off-by: Rosen Penev <rosenp@gmail.com>
 ---
- drivers/net/wireless/broadcom/b43/main.c  | 20 +++++
- drivers/net/wireless/broadcom/b43/phy_n.c | 94 +++++++++++++++++++++++
- drivers/net/wireless/broadcom/b43/phy_n.h | 18 +++++
- 3 files changed, 132 insertions(+)
 diff --git a/drivers/net/wireless/broadcom/b43/main.c b/drivers/net/wireless/broadcom/b43/main.c
 index 9f177af..6fe1c7d 100644
 --- a/drivers/net/wireless/broadcom/b43/main.c

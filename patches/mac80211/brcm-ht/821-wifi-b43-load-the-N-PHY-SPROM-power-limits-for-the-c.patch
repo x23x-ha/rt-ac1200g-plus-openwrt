@@ -1,8 +1,8 @@
-From c0a9dfacb1d1064f07b4c2cbb50e012655557387 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Rosen Penev <rosenp@gmail.com>
 Date: Thu, 15 Oct 2026 14:40:45 -0700
-Subject: [PATCH 821/846] wifi: b43: load the N-PHY SPROM power limits for the
- current band
+Subject: [PATCH] wifi: b43: load the N-PHY SPROM power limits for the current
+ band
 
 b43_nphy_op_recalc_txpower() always builds the per-rate power limits
 from the 2.4 GHz SPROM entries (maxpwr_2g, ofdm2gpo, mcs2gpo), even on
@@ -16,8 +16,6 @@ way b43_nphy_tx_power_ctl_setup() does.
 Fixes: 8615eb2870f1 ("b43: N-PHY: support setting custom TX power")
 Signed-off-by: Rosen Penev <rosenp@gmail.com>
 ---
- drivers/net/wireless/broadcom/b43/phy_n.c | 11 ++++++++++-
- 1 file changed, 10 insertions(+), 1 deletion(-)
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
 index 114aa33..27d7f50 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c

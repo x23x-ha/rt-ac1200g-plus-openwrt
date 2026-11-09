@@ -1,4 +1,6 @@
-b43: reduce number of RX slots
+From: Hauke Mehrtens <hauke@hauke-m.de>
+Date: Sun, 28 Apr 2013 16:55:53 +0000
+Subject: [PATCH] b43: reduce number of RX slots
 
 Use 32 RX slots instead of 256 to save memory, except on N-PHY and
 HT-PHY devices. The firmware acknowledges a frame before DMA has put it
@@ -6,7 +8,10 @@ in host memory, and drops it when no RX slot is free. An A-MPDU fills 16
 or more slots at once: on a BCM4331 serving a TCP download, 32 slots
 overran 104 times in 30 seconds, and the frames lost included TCP ACKs
 and the power save null frames of a phone (measured by Erik Conijn on a
-Netgear R6400). 256 slots cost about 1 MiB of RX buffers.
+Netgear R6400). 256 slots cost about 1 MiB of RX buffers, 2 MiB with
+HT, whose RX buffers have room for 3839-byte A-MSDUs.
+
+Signed-off-by: Rosen Penev <rosenp@gmail.com>
 ---
 diff --git a/drivers/net/wireless/broadcom/b43/dma.c b/drivers/net/wireless/broadcom/b43/dma.c
 index 4642e0c..bccba23 100644

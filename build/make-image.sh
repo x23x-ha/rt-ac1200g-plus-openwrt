@@ -46,6 +46,10 @@ curl -fsSL "$URL/sha256sums" | grep " \*$IB\$" | sed 's/ \*/  /' | shasum -a 256
 # FILES overlay: copied over the rootfs after the packages are installed
 F=$(mktemp -d); trap 'rm -rf "$F"' EXIT
 mkdir -p "$F/lib/modules/$KVER" && cp "$KO" "$F/lib/modules/$KVER/b43.ko"
+# firmware 784.2 for the BCM43217 when the module was built with FW630=1 (over the package's 666.2)
+if [ -d "$(dirname "$KO")/fw" ]; then
+	mkdir -p "$F/lib/firmware/b43" && cp "$(dirname "$KO")"/fw/*.fw "$F/lib/firmware/b43/"
+fi
 if [ -n "${WL:-}" ]; then   # see wl/README.md for what each piece does
 	W=$H/wl/files
 	mkdir -p "$F/usr/lib/wl" "$F/usr/libexec/wl" "$F/lib/netifd/wireless" \

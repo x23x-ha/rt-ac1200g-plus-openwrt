@@ -4,7 +4,8 @@
 #   ./run-build.sh          -> build/out/        (816 only: the real fix)
 #   DEBUG=1 ./run-build.sh  -> build/out-debug/  (816 + patches/mac80211/brcm-debug/*)
 #   TSSI=1 ./run-build.sh   -> build/out-tssi/   (clean set + patches/mac80211/brcm-tssi/*)
-#   HT=1 ./run-build.sh     -> build/out-ht/     (patches/mac80211/brcm-ht/*: PR 25922 + ours)
+#   HT=1 ./run-build.sh     -> build/out-ht/     (patches/mac80211/brcm-ht/*: PR 25922 + 880/881)
+#   FW630=1 (with any of the above): firmware 784.2 instead of 666.2, files in <out>/fw/
 #   PREPARE_ONLY=1 ...      apply the patches only (conflict check, ~1 min)
 set -euo pipefail
 H=$(cd "$(dirname "$0")/.." && pwd)
@@ -32,7 +33,7 @@ docker run --rm --platform linux/amd64 \
 	-v owrt-sdk-25126:/work \
 	-v "$H/build/dl:/dl:ro" \
 	-v "$PATCHES:/patches:ro" \
-	-e PREPARE_ONLY="${PREPARE_ONLY:-}" \
+	-e PREPARE_ONLY="${PREPARE_ONLY:-}" -e FW630="${FW630:-}" \
 	${EXTRA[@]+"${EXTRA[@]}"} \
 	-v "$H/build/build-b43.sh:/build-b43.sh:ro" \
 	-v "$OUT:/out" \
@@ -41,4 +42,6 @@ docker run --rm --platform linux/amd64 \
 		cp -v "$K" /out/b43.ko &&
 		$(ls staging_dir/toolchain-*/bin/*-objcopy | head -1) --strip-unneeded \
 			--remove-section=.comment /out/b43.ko /out/b43-stripped.ko &&
-		cp -v $(find bin -name "kmod-b43*.apk") /out/'
+		cp -v $(find bin -name "kmod-b43*.apk") /out/ &&
+		if [ -n "$FW630" ]; then   # firmware 784.2 for core rev 30 (BCM43217), for the image
+			mkdir -p /out/fw && cp -v $(dirname "$K")/../../firmware/b43/{ucode30_mimo,n16initvals30,n16bsinitvals30}.fw /out/fw/; fi'

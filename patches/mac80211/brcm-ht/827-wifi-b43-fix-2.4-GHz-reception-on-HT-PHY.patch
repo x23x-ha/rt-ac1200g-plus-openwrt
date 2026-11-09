@@ -1,7 +1,7 @@
-From 9c2bd7d9c25a55391e7e2195b369e583572d4100 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Rosen Penev <rosenp@gmail.com>
 Date: Sat, 17 Oct 2026 21:12:39 -0700
-Subject: [PATCH 827/846] wifi: b43: fix 2.4 GHz reception on HT-PHY
+Subject: [PATCH] wifi: b43: fix 2.4 GHz reception on HT-PHY
 
 On a BCM4331 (HT-PHY rev 1, radio 2059 rev 0) b43 barely receives in
 the 2.4 GHz band, with or without HT: against an access point half a
@@ -40,9 +40,6 @@ R6400 v2 and v1 have and the Apple card does not.
 Fixes: 98f8dc72ac50 ("b43: HT-PHY: init: add missing small-tables writes")
 Signed-off-by: Rosen Penev <rosenp@gmail.com>
 ---
- drivers/net/wireless/broadcom/b43/phy_ht.c    | 75 +++++++++++++++++--
- .../net/wireless/broadcom/b43/tables_phy_ht.c | 11 +++
- 2 files changed, 78 insertions(+), 8 deletions(-)
 diff --git a/drivers/net/wireless/broadcom/b43/phy_ht.c b/drivers/net/wireless/broadcom/b43/phy_ht.c
 index 9dc2559..cae4120 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_ht.c

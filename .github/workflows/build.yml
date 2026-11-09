@@ -47,8 +47,8 @@ jobs:
       - name: Build env image
         run: docker build -t owrt-sdk-env build
 
-      - name: "Build kmod-b43 (802.11n: PR 25922 series + 880-885)"
-        run: HT=1 build/run-build.sh
+      - name: "Build kmod-b43 (802.11n: PR 25922 series + 880/881, firmware 784.2)"
+        run: HT=1 FW630=1 build/run-build.sh
 
       - name: "Build the kernel with the bgmac fix (patches/kernel, 1-2 h)"
         run: build/build-kernel.sh

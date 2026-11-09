@@ -1,7 +1,7 @@
-From c6d5b20039f68fcb9d6781898ee28d041768932a Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Rosen Penev <rosenp@gmail.com>
 Date: Thu, 15 Oct 2026 01:41:22 -0700
-Subject: [PATCH 822/846] wifi: b43: back off the N-PHY TX power per rate
+Subject: [PATCH] wifi: b43: back off the N-PHY TX power per rate
 
 On N-PHY rev 3+ the hardware TX power control aims at the highest
 per-rate target, and an adjusted power table backs each rate group off
@@ -20,6 +20,11 @@ up delivered nothing.
 Set the offsets from the per-rate targets b43 already computes from
 the SPROM, as brcmsmac does, before the table is built.
 
+The further offsets of CDD and STBC (cddpo, stbcpo) are in 0.5 dB
+steps like the others, but were subtracted from the 0.25 dB targets as
+they are. Double them, as brcmsmac does; until now they had no effect,
+as the targets only set the highest one.
+
 b43 only operates at 20 MHz and struct b43_ppr only holds 20 MHz rate
 targets, so only the 20 MHz offsets are set. The 40 MHz entries of
 tx_power_offset[] stay zero and are never used.
@@ -31,8 +36,6 @@ Mbit/s.
 Fixes: 8615eb2870f1 ("b43: N-PHY: support setting custom TX power")
 Signed-off-by: Rosen Penev <rosenp@gmail.com>
 ---
- drivers/net/wireless/broadcom/b43/phy_n.c | 11 +++++++++++
- 1 file changed, 11 insertions(+)
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
 index 27d7f50..ec46fdd 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
@@ -62,3 +65,47 @@ index 27d7f50..ec46fdd 100644
  	/* Apply */
  	b43_mac_suspend(dev);
  	b43_nphy_tx_power_ctl_setup(dev);
+diff --git a/drivers/net/wireless/broadcom/b43/ppr.c b/drivers/net/wireless/broadcom/b43/ppr.c
+index 26514cc..df251d5 100644
+--- a/drivers/net/wireless/broadcom/b43/ppr.c
++++ b/drivers/net/wireless/broadcom/b43/ppr.c
+@@ -74,6 +74,7 @@ bool b43_ppr_load_max_from_sprom(struct b43_wldev *dev, struct b43_ppr *ppr,
+ 	u8 maxpwr, off;
+ 	u32 sprom_ofdm_po;
+ 	u16 *sprom_mcs_po;
++	/* Further offsets of CDD and STBC, also in 0.5 dB steps */
+ 	u8 extra_cdd_po, extra_stbc_po;
+ 	int i;
+ 
+@@ -143,13 +144,13 @@ bool b43_ppr_load_max_from_sprom(struct b43_wldev *dev, struct b43_ppr *ppr,
+ 		off = ((sprom_mcs_po[0] >> (i * 4)) & 0xf) * 2;
+ 		rates->mcs_20_cdd[i] = maxpwr - off;
+ 		if (phy->type == B43_PHYTYPE_N && phy->rev >= 3)
+-			rates->mcs_20_cdd[i] -= extra_cdd_po;
++			rates->mcs_20_cdd[i] -= extra_cdd_po * 2;
+ 	}
+ 	for (i = 0; i < 4; i++) {
+ 		off = ((sprom_mcs_po[1] >> (i * 4)) & 0xf) * 2;
+ 		rates->mcs_20_cdd[4 + i] = maxpwr - off;
+ 		if (phy->type == B43_PHYTYPE_N && phy->rev >= 3)
+-			rates->mcs_20_cdd[4 + i] -= extra_cdd_po;
++			rates->mcs_20_cdd[4 + i] -= extra_cdd_po * 2;
+ 	}
+ 
+ 	/* OFDM 20 CDD */
+@@ -167,13 +168,13 @@ bool b43_ppr_load_max_from_sprom(struct b43_wldev *dev, struct b43_ppr *ppr,
+ 		off = ((sprom_mcs_po[0] >> (i * 4)) & 0xf) * 2;
+ 		rates->mcs_20_stbc[i] = maxpwr - off;
+ 		if (phy->type == B43_PHYTYPE_N && phy->rev >= 3)
+-			rates->mcs_20_stbc[i] -= extra_stbc_po;
++			rates->mcs_20_stbc[i] -= extra_stbc_po * 2;
+ 	}
+ 	for (i = 0; i < 4; i++) {
+ 		off = ((sprom_mcs_po[1] >> (i * 4)) & 0xf) * 2;
+ 		rates->mcs_20_stbc[4 + i] = maxpwr - off;
+ 		if (phy->type == B43_PHYTYPE_N && phy->rev >= 3)
+-			rates->mcs_20_stbc[4 + i] -= extra_stbc_po;
++			rates->mcs_20_stbc[4 + i] -= extra_stbc_po * 2;
+ 	}
+ 
+ 	/* MCS 20 SDM */

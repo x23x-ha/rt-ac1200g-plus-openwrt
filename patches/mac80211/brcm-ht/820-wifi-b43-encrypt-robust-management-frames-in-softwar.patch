@@ -1,8 +1,7 @@
-From a14e887a273d1e282f02526257e82b6fa9106564 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Rosen Penev <rosenp@gmail.com>
 Date: Sat, 17 Oct 2026 14:20:59 -0700
-Subject: [PATCH 820/846] wifi: b43: encrypt robust management frames in
- software
+Subject: [PATCH] wifi: b43: encrypt robust management frames in software
 
 b43 sets MFP_CAPABLE, and uploads CCMP keys to the hardware with only
 IEEE80211_KEY_FLAG_GENERATE_IV. mac80211 then leaves the encryption of
@@ -31,8 +30,6 @@ iperf3 from 11 to 43 Mbit/s down and from 11 to 41 Mbit/s up.
 Fixes: 75d057bda1fb ("b43: Fix connection problem with WPA3")
 Signed-off-by: Rosen Penev <rosenp@gmail.com>
 ---
- drivers/net/wireless/broadcom/b43/main.c | 6 ++++++
- 1 file changed, 6 insertions(+)
 diff --git a/drivers/net/wireless/broadcom/b43/main.c b/drivers/net/wireless/broadcom/b43/main.c
 index 7bcc3d2..9f177af 100644
 --- a/drivers/net/wireless/broadcom/b43/main.c

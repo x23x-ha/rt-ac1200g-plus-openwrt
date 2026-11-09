@@ -1,8 +1,8 @@
-From eea202de990efaa177f2aaea9c53972ce8499685 Mon Sep 17 00:00:00 2001
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Rosen Penev <rosenp@gmail.com>
 Date: Thu, 15 Oct 2026 21:53:54 -0700
-Subject: [PATCH 826/846] wifi: b43: don't read the LPF bandwidth on N-PHY rev
- 3-6 for TX calibration
+Subject: [PATCH] wifi: b43: don't read the LPF bandwidth on N-PHY rev 3-6 for
+ TX calibration
 
 b43_nphy_tx_cal_phy_setup() reads the LPF bandwidth control from the RF
 sequence table on all N-PHY revisions from 3 on, but only uses it on
@@ -18,8 +18,6 @@ runs and returns success on the RT-N16.
 Fixes: 40c68f20e63c ("b43; N-PHY: write most of the missing code for revs 7+")
 Signed-off-by: Rosen Penev <rosenp@gmail.com>
 ---
- drivers/net/wireless/broadcom/b43/phy_n.c | 9 ++++++---
- 1 file changed, 6 insertions(+), 3 deletions(-)
 diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
 index 04be243..a36a931 100644
 --- a/drivers/net/wireless/broadcom/b43/phy_n.c
