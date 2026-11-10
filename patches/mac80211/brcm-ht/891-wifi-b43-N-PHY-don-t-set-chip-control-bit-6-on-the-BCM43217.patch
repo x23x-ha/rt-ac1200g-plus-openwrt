@@ -1,0 +1,45 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: x23x-ha <190664518+x23x-ha@users.noreply.github.com>
+Date: Wed, 11 Nov 2026 01:38:49 +0300
+Subject: [PATCH] wifi: b43: N-PHY: don't set chip control bit 6 on the
+ BCM43217
+
+b43_phy_initn() sets bit 6 of chipcommon chip control on every N-PHY
+rev 3+ with an external 2.4 GHz LNA. On the BCM43217 that bit cuts the
+second core's RX by about 30 dB: on an ASUS RT-AC1200G+ the per-chain
+RSSI was -49/-80 with b43, while the vendor firmware leaves the bit
+clear and gets -44/-41. Setting the bit by hand under the vendor driver
+drops core 1 to -73/-75; clearing it brings it back.
+
+Clear the bit on the BCM43217 instead of setting it.
+
+diff --git a/drivers/net/wireless/broadcom/b43/phy_n.c b/drivers/net/wireless/broadcom/b43/phy_n.c
+index 1c9325d..75c02bc 100644
+--- a/drivers/net/wireless/broadcom/b43/phy_n.c
++++ b/drivers/net/wireless/broadcom/b43/phy_n.c
+@@ -7254,14 +7254,23 @@ static int b43_phy_initn(struct b43_wldev *dev)
+ 	u16 clip[2];
+ 	bool do_cal = false;
+ 
++	/*
++	 * Not on the BCM43217: there chip control bit 6 cuts core 1's RX by
++	 * ~30 dB (vendor firmware leaves it clear; setting it by hand under
++	 * the vendor driver gives the same loss). Clear it there instead.
++	 */
+ 	if ((dev->phy.rev >= 3) &&
+ 	   (sprom->boardflags_lo & B43_BFL_EXTLNA) &&
+ 	   (b43_current_band(dev->wl) == NL80211_BAND_2GHZ)) {
+ 		switch (dev->dev->bus_type) {
+ #ifdef CPTCFG_B43_BCMA
+ 		case B43_BUS_BCMA:
+-			bcma_cc_set32(&dev->dev->bdev->bus->drv_cc,
+-				      BCMA_CC_CHIPCTL, 0x40);
++			if (dev->dev->chip_id == BCMA_CHIP_ID_BCM43217)
++				bcma_cc_mask32(&dev->dev->bdev->bus->drv_cc,
++					       BCMA_CC_CHIPCTL, ~0x40);
++			else
++				bcma_cc_set32(&dev->dev->bdev->bus->drv_cc,
++					      BCMA_CC_CHIPCTL, 0x40);
+ 			break;
+ #endif
+ #ifdef CPTCFG_B43_SSB

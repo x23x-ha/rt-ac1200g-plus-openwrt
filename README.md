@@ -180,6 +180,18 @@ receive, 64-frame block ack window). Rebased from backports 7.2 onto 25.12's
 `kzalloc_flex`). The PR's non-b43 patches and 828's bcma part are not
 included (this board's SPROM data is rev 8, so 828 does not apply to it).
 
+Two patches of this repository on top:
+
+- **891: second RX chain fixed.** b43 sets bit 6 of the chip control
+  register on every N-PHY rev 3+ board with an external 2.4 GHz LNA. On the
+  BCM43217 that bit cuts the second core's reception by about 30 dB
+  (per-chain RSSI -49/-80 with b43; the ASUS firmware leaves the bit clear
+  and gets -44/-41; setting it by hand under the ASUS firmware drops core 1
+  to -75). 891 clears it on the BCM43217: now -50/-45.
+- **890: per-chain RSSI.** b43 now reports both chains' signal, so
+  `iw dev phy0-ap0 station dump | grep signal` shows `signal: -45 [-50, -45]`.
+  Two values more than ~15 dB apart mean one receive chain is not working.
+
 `FW630=1` builds with firmware 784.2 and `make-image.sh` then ships it.
 
 ```sh

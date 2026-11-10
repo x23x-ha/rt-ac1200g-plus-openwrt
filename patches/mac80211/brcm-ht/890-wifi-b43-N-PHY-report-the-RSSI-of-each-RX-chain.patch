@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: x23x-ha <190664518+x23x-ha@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 23:16:10 +0300
+Subject: [PATCH] wifi: b43: N-PHY: report the RSSI of each RX chain
+
+b43 reads both chains' RX power from the RX header but hands mac80211
+only the larger one. Report both as chain_signal, so a weak chain (a
+loose antenna connector, a dead LNA) shows up in the station dump.
+
+diff --git a/drivers/net/wireless/broadcom/b43/xmit.c b/drivers/net/wireless/broadcom/b43/xmit.c
+index 4336939..df43e79 100644
+--- a/drivers/net/wireless/broadcom/b43/xmit.c
++++ b/drivers/net/wireless/broadcom/b43/xmit.c
+@@ -1246,10 +1246,17 @@ void b43_rx(struct b43_wldev *dev, struct sk_buff *skb, const void *_rxhdr,
+ 		break;
+ 	case B43_PHYTYPE_N:
+ 		/* Broadcom has code for min and avg, but always uses max */
+-		if (rxhdr->power0 == 16 || rxhdr->power0 == 32)
++		if (rxhdr->power0 == 16 || rxhdr->power0 == 32) {
+ 			status.signal = max(rxhdr->power1, rxhdr->power2);
+-		else
++			status.chain_signal[0] = rxhdr->power1;
++			status.chain_signal[1] = rxhdr->power2;
++		} else {
+ 			status.signal = max(rxhdr->power0, rxhdr->power1);
++			status.chain_signal[0] = rxhdr->power0;
++			status.chain_signal[1] = rxhdr->power1;
++		}
++		/* per-chain RSSI for "iw station dump" (signal: x [c0, c1]) */
++		status.chains = BIT(0) | BIT(1);
+ 		break;
+ 	case B43_PHYTYPE_B:
+ 	case B43_PHYTYPE_G:

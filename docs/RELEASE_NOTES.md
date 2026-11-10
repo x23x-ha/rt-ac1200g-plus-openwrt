@@ -6,7 +6,21 @@ rescue, back to stock and back to OpenWrt. See the README for flashing and
 recovery, and verify the files against `sha256sums`. Only flash the `asus_rt-ac1200g-plus` images on an
 RT-AC1200G+.
 
-## What's new in v25.12.6-5
+## What's new in v25.12.6-6
+
+- **2.4 GHz: second receive chain fixed (patch 891).** b43 set a chip control
+  bit that, on the BCM43217, cuts the second chain's reception by about 30 dB.
+  The ASUS firmware leaves it clear; 891 clears it. Per-chain signal went from
+  -49/-80 to -44/-48 dBm. iPhone at the same spot (down / up Mbit/s):
+  71/113, 67/96, 69/91, 67/49, 53/70, against 61/47, 45/60, 56/62 before.
+  Upload now matches or beats the Broadcom `wl` driver (73/80 at best).
+- **Per-chain RSSI (patch 890):** `iw dev phy0-ap0 station dump | grep signal`
+  shows both chains, e.g. `-44 [-44, -48]`.
+- Tested on the author's router with the same b43 module (63c5f917), settings
+  kept. The release images themselves were not fresh-installed. Kernel and fast
+  path unchanged from v25.12.6-5.
+
+## v25.12.6-5
 
 - **NAT fast path** (`fastpath.ko`, from Vygis1's Archer C1200 v2 port): wired
   NAT about doubles, 758-819 Mbit/s down against 378-411 with flow offloading
