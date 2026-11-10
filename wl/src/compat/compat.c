@@ -33,6 +33,12 @@
 #include <linux/unaligned.h>
 #include "k26.h"
 
+/* wl-dbg trace lines (ioctls of nas/eapd, timers, EAPOL, ...): off by default,
+ * `echo 1 > /sys/module/wl/parameters/dbg` turns them on at runtime. */
+static uint dbg;
+module_param(dbg, uint, 0644);
+#define wl_dbg(fmt, ...) do { if (dbg) pr_info(fmt, ##__VA_ARGS__); } while (0)
+
 /* ------------------------------------------------------------------ */
 /* The blob was compiled !SMP: its spinlocks are zero-sized and compile	*/
 /* away, so spin_lock_bh(&wl->lock) became a bare local_bh_disable().	*/
@@ -170,7 +176,7 @@ static void k26_timer_fire(struct timer_list *t)
 	int n = atomic_inc_return(&k26_timer_fires);
 
 	if (n <= 5)
-		pr_info("wl-dbg: timer fire #%d blob=%p fn=%p\n", n, kt->blob, fn);
+		wl_dbg("wl-dbg: timer fire #%d blob=%p fn=%p\n", n, kt->blob, fn);
 
 	if (fn)
 		fn(data);
@@ -206,7 +212,7 @@ void wlc26_add_timer(void *blob)
 	int n = atomic_inc_return(&k26_timer_adds);
 
 	if (n <= 5)
-		pr_info("wl-dbg: timer add #%d blob=%p exp=%lu now=%lu delta=%ld\n",
+		wl_dbg("wl-dbg: timer add #%d blob=%p exp=%lu now=%lu delta=%ld\n",
 			n, blob, exp, jiffies, (long)(exp - jiffies));
 
 	if (kt)
@@ -275,7 +281,7 @@ void wlc26_tasklet_init(void *blob, void (*func)(unsigned long), unsigned long d
 {
 	k26_wrp(blob, K26_TASKLET_FUNC, func);
 	k26_wr32(blob, K26_TASKLET_DATA, (u32)data);
-	pr_info("wl-dbg: tasklet_init blob=%p func=%p data=%lx\n", blob, func, data);
+	wl_dbg("wl-dbg: tasklet_init blob=%p func=%p data=%lx\n", blob, func, data);
 	tasklet_for(blob);
 }
 
@@ -285,7 +291,7 @@ void wlc26___tasklet_schedule(void *blob)
 	int n = atomic_inc_return(&k26_tasklet_scheds);
 
 	if (n <= 3)
-		pr_info("wl-dbg: tasklet sched #%d blob=%p kt=%p\n", n, blob, kt);
+		wl_dbg("wl-dbg: tasklet sched #%d blob=%p kt=%p\n", n, blob, kt);
 
 	if (kt)
 		tasklet_schedule(&kt->t);
@@ -849,7 +855,7 @@ static netdev_tx_t tramp_xmit(struct sk_buff *skb, struct net_device *d)
 	k26_st_tx++;
 	/* EAPOL out (nas -> eapd -> here): the 4-way handshake */
 	if (skb->len >= 14 && skb->data[12] == 0x88 && skb->data[13] == 0x8e)
-		pr_info("wl-dbg: tx EAPOL len=%u to %pM\n", skb->len, skb->data);
+		wl_dbg("wl-dbg: tx EAPOL len=%u to %pM\n", skb->len, skb->data);
 
 	if (!o || !o->ndo_start_xmit) {
 		dev_kfree_skb_any(skb);
@@ -873,12 +879,12 @@ static netdev_tx_t tramp_xmit(struct sk_buff *skb, struct net_device *d)
 		if (tl++ < 200) {
 			u8 *e = skb->data;
 
-			pr_info("wl-dbg: txwin dst=%pM src=%pM proto=%02x%02x len=%u k26len=%u hdr-%s\n",
+			wl_dbg("wl-dbg: txwin dst=%pM src=%pM proto=%02x%02x len=%u k26len=%u hdr-%s\n",
 				e, e + 6, e[12], e[13], skb->len, p->len,
 				memcmp(p->data, skb->data, 14) ? "MISMATCH" : "ok");
 			k26_txflush_dev(n);
 			rc = o->ndo_start_xmit(p, n->k26);
-			pr_info("wl-dbg: txwin rc=%d\n", rc);
+			wl_dbg("wl-dbg: txwin rc=%d\n", rc);
 			return NETDEV_TX_OK;
 		}
 	}
@@ -1051,7 +1057,7 @@ static int tramp_siocdevprivate(struct net_device *d, struct ifreq *ifr,
 	if (copy_to_user(data, &ioc, sizeof(ioc)))
 		rc = rc ?: -EFAULT;
 	if (trace && ioc.cmd != 1 && ioc.cmd != 0)
-		pr_info("wl-dbg: ioctl %s cmd=%u %s len=%u set=%u -> %d\n",
+		wl_dbg("wl-dbg: ioctl %s cmd=%u %s len=%u set=%u -> %d\n",
 			current->comm, ioc.cmd, name, ioc.len, ioc.set, rc);
 	return rc;
 }
@@ -1245,7 +1251,7 @@ int wlc26_netif_rx(struct k26_skb *p)
 			static int stacks;
 
 			evlog++;
-			pr_info("wl-dbg: event type=%u status=%u reason=%u flags=%04x datalen=%u addr=%pM\n",
+			wl_dbg("wl-dbg: event type=%u status=%u reason=%u flags=%04x datalen=%u addr=%pM\n",
 				type, get_unaligned_be32(e + 8),
 				get_unaligned_be32(e + 12), get_unaligned_be16(e + 2),
 				get_unaligned_be32(e + 20), e + 24);
@@ -1260,7 +1266,7 @@ int wlc26_netif_rx(struct k26_skb *p)
 		if (learn)
 			src = h + ETH_ALEN;	/* reported once the netdev is known */
 		if (atomic_read(&k26_rx_ok) < 2000 && h[12] == 0x88 && h[13] == 0x8e)
-			pr_info("wl-dbg: rx EAPOL from %pM\n", h + 6);
+			wl_dbg("wl-dbg: rx EAPOL from %pM\n", h + 6);
 	}
 
 	if (!r) {
@@ -1271,7 +1277,7 @@ int wlc26_netif_rx(struct k26_skb *p)
 	if (!n || n->k26 != p->dev) {
 		n = ndev_by_k26(p->dev);
 		if (!n || !n->registered) {
-			pr_info("wl-dbg: rx DROP - no netdev for dev=%p\n", p->dev);
+			wl_dbg("wl-dbg: rx DROP - no netdev for dev=%p\n", p->dev);
 			k26_skb_free(p);
 			return NET_RX_DROP;
 		}
@@ -1512,7 +1518,7 @@ void __iomem *wlc26___arm_ioremap(phys_addr_t phys, size_t size, unsigned int mt
 {
 	void __iomem *p = ioremap(phys, size);
 
-	pr_info("wl-dbg: ioremap %pa +0x%zx -> %p\n", &phys, size, p);
+	wl_dbg("wl-dbg: ioremap %pa +0x%zx -> %p\n", &phys, size, p);
 	if (p && phys <= K26_D11_PHYS && phys + size >= K26_D11_PHYS + 0x1000) {
 		k26_d11_regs = p + (K26_D11_PHYS - phys);
 		if (!k26_regs_proc)
@@ -1562,7 +1568,7 @@ static irqreturn_t k26_isr_wrap(int irq, void *dev)
 	 * Use `wl macreg` once the device is up instead. Keep this print rare
 	 * - at one line per 1000 the storm floods the 115200 console. */
 	if (n <= 3)
-		pr_info("wl-dbg: isr #%d ret=%d\n", n, (int)r);
+		wl_dbg("wl-dbg: isr #%d ret=%d\n", n, (int)r);
 
 	if (r != IRQ_NONE) {
 		k26_isr_none_run = 0;
@@ -1600,7 +1606,7 @@ int wlc26_request_threaded_irq(unsigned int irq, irq_handler_t handler,
 			       irq_handler_t thread_fn, unsigned long flags,
 			       const char *name, void *dev)
 {
-	pr_info("wl-dbg: request_irq %u handler=%p thread=%p flags=0x%lx dev=%p\n",
+	wl_dbg("wl-dbg: request_irq %u handler=%p thread=%p flags=0x%lx dev=%p\n",
 		irq, handler, thread_fn, flags, dev);
 	k26_real_isr = handler;
 	k26_isr_dev = dev;
