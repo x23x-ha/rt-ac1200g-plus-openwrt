@@ -1,5 +1,6 @@
 #!/bin/sh
-# uci-defaults (runs once after flashing): 5 GHz and 2.4 GHz on the Broadcom wl blob.
+# uci-defaults (runs once after flashing): 5 GHz on the Broadcom wl blob, 2.4 GHz on b43
+# (or on wl with wireless.radio0.use_wl=1).
 # The module and tools are in the image (/usr/lib/wl); this only adds config.
 # Never overwrites an existing radio1, never sets a key.
 
@@ -32,34 +33,40 @@ if ! uci -q get wireless.radio1 >/dev/null; then
 	uci commit wireless
 fi
 
-# 2.4 GHz on the blob too (2026-11-03: 2-3x b43's throughput here). Runs after
-# every flash, so it only converts a b43 radio0; set wireless.radio0.keep_b43=1
-# to stay on b43. b43 itself is not loaded (the image ships /etc/modules.d/b43
-# without the module name), so no b43 radio is detected and none shows in LuCI.
-# (Until 2026-11-03 a disabled "b43_parked" wifi-device held the path instead.)
+# 2.4 GHz: b43 by default (PR 25922 + BCM43217 fixes + 891: at least as fast as wl,
+# hostapd/WPA3). The image loads b43 (/etc/modules.d/b43).
+# To run the BCM43217 on the blob instead: uci set wireless.radio0.use_wl=1, then
+# flash again (see wl/README.md).
+# keep_b43 (the old opt-out from wl) is no longer needed.
 uci -q delete wireless.b43_parked && uci commit wireless
-if [ "$(uci -q get wireless.radio0.keep_b43)" = 1 ]; then
-	echo b43 > /etc/modules.d/b43	# b43 loads from the next boot on
-fi
-if [ "$(uci -q get wireless.radio0.keep_b43)" != 1 ] &&
-   [ "$(uci -q get wireless.radio0.type)" != broadcom ]; then
-	if ! uci -q get wireless.radio0 >/dev/null; then
-		uci set wireless.radio0=wifi-device
-		uci set wireless.radio0.band=2g
-		uci set wireless.radio0.channel=1
-		uci set wireless.default_radio0=wifi-iface
-		uci set wireless.default_radio0.device=radio0
-		uci set wireless.default_radio0.network=lan
-		uci set wireless.default_radio0.mode=ap
-		uci set wireless.default_radio0.ssid='ASUS'
-		uci set wireless.default_radio0.encryption='psk2+ccmp'
-		uci set wireless.radio0.disabled=1	# no key yet: enable after setting one
+uci -q delete wireless.radio0.keep_b43 && uci commit wireless
+if [ "$(uci -q get wireless.radio0.use_wl)" = 1 ]; then
+	printf '# b43 not loaded: the BCM43217 (2.4 GHz) runs on wl (wireless.radio0.use_wl=1).\n' > /etc/modules.d/b43
+	if [ "$(uci -q get wireless.radio0.type)" != broadcom ]; then
+		if ! uci -q get wireless.radio0 >/dev/null; then
+			uci set wireless.radio0=wifi-device
+			uci set wireless.radio0.band=2g
+			uci set wireless.radio0.channel=1
+			uci set wireless.default_radio0=wifi-iface
+			uci set wireless.default_radio0.device=radio0
+			uci set wireless.default_radio0.network=lan
+			uci set wireless.default_radio0.mode=ap
+			uci set wireless.default_radio0.ssid='ASUS'
+			uci set wireless.default_radio0.encryption='psk2+ccmp'
+			uci set wireless.radio0.disabled=1	# no key yet: enable after setting one
+		fi
+		uci set wireless.radio0.type=broadcom
+		uci -q delete wireless.radio0.path
+		uci set wireless.radio0.htmode=HT20
+		# hairpin off: the blob's L2 update frame comes back and disassociates clients
+		uci set wireless.default_radio0.multicast_to_unicast=0
+		uci commit wireless
 	fi
-	uci set wireless.radio0.type=broadcom
-	uci -q delete wireless.radio0.path
-	uci set wireless.radio0.htmode=HT20
-	# hairpin off: same L2-update disassociation as on 5 GHz
-	uci set wireless.default_radio0.multicast_to_unicast=0
+elif [ "$(uci -q get wireless.radio0.type)" = broadcom ]; then
+	# kept config from a wl-on-2.4 image: back to b43
+	uci set wireless.radio0.type=mac80211
+	uci set wireless.radio0.path='18000000.axi/bcma0:2/pci0000:00/0000:00:00.0/0000:01:00.0/bcma1:1'
+	uci -q delete wireless.default_radio0.multicast_to_unicast
 	uci commit wireless
 fi
 

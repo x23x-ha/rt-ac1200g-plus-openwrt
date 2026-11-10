@@ -1,17 +1,17 @@
-# 5 GHz (and faster 2.4 GHz): Broadcom's `wl` driver
+# 5 GHz: Broadcom's `wl` driver
 
 The 802.11ac core inside the BCM47189 has no open Linux driver. Broadcom's own
 driver does run on it: the `wl_apsta.o` object from TP-Link's GPL release for the
 Archer C1200 v2 (same SoC family), built for Linux 2.6.36, loaded into OpenWrt's
-6.12 kernel through an ABI shim. It drives both radios, so 2.4 GHz moves from b43
-to `wl` too.
+6.12 kernel through an ABI shim. 2.4 GHz stays on b43 by default; `wl` can drive it
+too (`wireless.radio0.use_wl=1`), but since v25.12.6-6 b43 is at least as fast there.
 
 Measured on this router (iPhone, same spot, router CPU not the limit):
 
 | | b43 image (HT) | wl image |
 |---|---|---|
 | 5 GHz | no driver | 802.11ac VHT80, 866 Mbit/s link, 152 down / 211 up |
-| 2.4 GHz | 32-35 down / 55-58 up | 66 down / 85 up (HT20) |
+| 2.4 GHz | 67-71 down / 91-113 up (v25.12.6-6) | 66-74 down / 60-85 up (HT20) |
 
 **Nothing closed is in this repository.** You download Broadcom's object (inside
 TP-Link's GPL tarball) and the stock userspace tools (inside TP-Link's firmware)
@@ -54,10 +54,10 @@ Flash as described in the main README (patched image, `sysupgrade` or CFE rescue
 
 ## After flashing
 
-- 2.4 GHz comes up as "ASUS" on channel 1 (HT20), 5 GHz as "ASUS-5G" on channel 36
-  (VHT80). **Both start disabled without a key**: set one, then enable
-  (LuCI → Wireless, or `uci set wireless.default_radio1.key=…; uci set
-  wireless.radio1.disabled=0; uci commit wireless; wifi`).
+- 5 GHz comes up as "ASUS-5G" on channel 36 (VHT80), **disabled without a key**:
+  set one, then enable (LuCI → Wireless, or `uci set wireless.default_radio1.key=…;
+  uci set wireless.radio1.disabled=0; uci commit wireless; wifi`). 2.4 GHz is the
+  usual b43 radio (radio0), set it up as on the b43 image.
 - Encryption: WPA2-PSK (CCMP) or open. No WPA3, no multiple SSIDs per radio:
   WPA2 is done by Broadcom's `nas`, not hostapd.
 - Country: the driver's own locale is `wireless.radio1.wl_country` (default
@@ -65,8 +65,12 @@ Flash as described in the main README (patched image, `sysupgrade` or CFE rescue
   not reach it. Check what is legal where you are.
 - `iwinfo` (a ucode script in 25.12) only knows nl80211 radios; with
   `build-iwinfo.sh` LuCI and `ubus call iwinfo info '{"device":"eth2"}'` work.
-- Back to b43 for 2.4 GHz: `uci set wireless.radio0.keep_b43=1` before flashing,
-  or by hand: `echo b43 > /etc/modules.d/b43`, radio0 back to `type mac80211`, reboot.
+- 2.4 GHz on `wl` instead: `uci set wireless.radio0.use_wl=1; uci commit wireless`,
+  then flash the wl image again (the first-boot script converts radio0 and stops
+  loading b43). Back to b43: delete `use_wl` and flash again. Note that this `wl`
+  build sets the same chip control bit that b43 patch 891 clears, so its second
+  2.4 GHz receive chain is about 30 dB weaker (see the main README).
+  (`keep_b43`, the opt-out of earlier releases, is no longer needed.)
 
 ## Things to know
 
@@ -93,5 +97,5 @@ Flash as described in the main README (patched image, `sysupgrade` or CFE rescue
 | `files/mac80211-multi.uc` | `/lib/netifd/wireless/mac80211.sh`: serves both `mac80211` and `broadcom` radios |
 | `files/mac80211.orig.sh` | OpenWrt's original `mac80211.sh`, called for mac80211 radios |
 | `files/wl-guard` | the boot-loop guard |
-| `files/90-rt-ac1200g-wl` | first-boot settings (both radios on wl, disabled, no key) |
+| `files/90-rt-ac1200g-wl` | first-boot settings (5 GHz on wl, disabled, no key; 2.4 GHz on b43 unless `use_wl=1`) |
 | `iwinfo/`, `build-iwinfo.sh` | libiwinfo's `wl` backend |

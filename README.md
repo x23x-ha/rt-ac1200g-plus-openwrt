@@ -9,23 +9,22 @@ What works:
 - **Device tree:** LEDs, reset/WPS buttons and USB port power follow the ASUS
   layout.
 - **2.4 GHz Wi-Fi (b43):** 802.11n HT20 with two streams and A-MPDU (the HT
-  build, `HT=1`, see [802.11n](#24-ghz-80211n-ht20)): about 60 down / 50 up
-  Mbit/s on 2x2 clients, close to Broadcom's `wl` on download. 802.11g with
-  the plain build.
+  build, `HT=1`, see [802.11n](#24-ghz-80211n-ht20)): 67-71 down / 91-113 up
+  Mbit/s on an iPhone (v25.12.6-6), as fast as or faster than Broadcom's `wl`.
+  802.11g with the plain build.
+- **NAT fast path** (`fastpath.ko`, see [NAT fast path](#nat-fast-path)): wired
+  NAT 758-819 Mbit/s down.
 
 What doesn't:
 
 - **5 GHz:** the 802.11ac core inside the SoC has no open Linux driver. It does
   work with Broadcom's own `wl` driver, which you build yourself from TP-Link's
   downloads (nothing closed is in this repo): see [wl/README.md](wl/README.md).
-  That image also moves 2.4 GHz to `wl`.
-- **2.4 GHz upload** from some clients is still below `wl` (iPhone 49 vs 85
-  Mbit/s).
-
-- **Forwarded traffic** with OpenWrt's kernel: the SoC's gmac corrupts some
-  forwarded frames (UDP checksum errors, truncated packets; worst for Wi-Fi
-  uploads). `build/build-kernel.sh` builds the kernel with the fix (64-byte TX
-  DMA bursts); use it with `ZIMAGE=build/out-kernel/zImage build/make-image.sh`.
+  2.4 GHz stays on b43 there (optionally `wl`, see its README).
+- **Forwarded traffic** with OpenWrt's stock kernel: the SoC's gmac corrupts
+  some forwarded frames (UDP checksum errors, truncated packets; worst for Wi-Fi
+  uploads). The release images use a kernel with the fix (64-byte TX DMA bursts,
+  part of patch 323); `build/build-kernel.sh` builds it.
 
 Status: tested on one hardware rev A unit. Use at your own risk.
 
@@ -140,6 +139,32 @@ that range. A rebuilt header has to follow the same rule.
 mtd -f -p <offset> write <block.bin> firmware
 dd if=/dev/mtd1 bs=65536 count=<n> | sha256sum      # verify before reboot
 ```
+
+## NAT fast path
+
+The release images carry `fastpath.ko` from Vygis1's
+[Archer C1200 v2 port](https://github.com/Vygis1/archer-c1200-v2-openwrt)
+(GPL-2.0, sources in `fastpath/`) and a kernel with its bgmac hook (patches 323
+and 324 in `patches/kernel-fastpath/`). It caches NATed IPv4/IPv6 TCP and UDP
+flows and forwards them between the switch ports before the normal network
+stack, on top of OpenWrt's flow offloading.
+
+- **Needs Software flow offloading on** (LuCI: Network -> Firewall, or
+  `uci set firewall.@defaults[0].flow_offloading=1; uci commit firewall;
+  fw4 reload`). A fresh install has it off; without it the module does nothing.
+- `cat /proc/fastpath` shows whether it is enabled and its counters.
+- Module and kernel must be built together (`FASTPATH=1 build/build-kernel.sh`);
+  `fastpath-6.12.112.ko` and `zImage-6.12.112-fastpath` are attached to the release.
+
+Measured on this router (down / up Mbit/s, three runs):
+
+| | flow offloading only | + fast path |
+|---|---|---|
+| wired PC through NAT | 380/435, 378/414, 411/432 | 819/550, 793/419, 758/536 |
+| iPhone, 5 GHz (`wl`) | 184/236, 193/263, 196/224 | 232/248, 247/233, 237/257 |
+| 2.4 GHz (b43) | unchanged | unchanged |
+
+The stock ASUS firmware (hardware NAT) did about 868/790 wired.
 
 ## 2.4 GHz: b43 patches
 

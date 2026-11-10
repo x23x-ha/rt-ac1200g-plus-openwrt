@@ -79,8 +79,8 @@ if [ -n "${WL:-}" ]; then   # see wl/README.md for what each piece does
 	cp "$W/mac80211-multi.uc" "$F/lib/netifd/wireless/mac80211.sh"
 	cp "$W/wl-guard" "$F/etc/init.d/wl-guard"
 	cp "$W/90-rt-ac1200g-wl" "$F/etc/uci-defaults/90-rt-ac1200g-wl"
-	# b43 is not loaded: the 2.4 GHz chip runs on wl (wireless.radio0.keep_b43=1 brings it back)
-	printf '# b43 not loaded: the BCM43217 (2.4 GHz) runs on wl.\n# Back to b43: put the line  b43  here and reboot.\n' > "$F/etc/modules.d/b43"
+	# 2.4 GHz stays on b43; wireless.radio0.use_wl=1 (then flash again) moves it to wl,
+	# and 90-rt-ac1200g-wl then comments out /etc/modules.d/b43
 	if [ -f "$H/build/out-iwinfo/libiwinfo.so.20230701" ]; then
 		mkdir -p "$F/usr/lib"
 		cp "$H/build/out-iwinfo/libiwinfo.so.20230701" "$F/usr/lib/libiwinfo.so.20230701"

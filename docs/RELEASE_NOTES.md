@@ -16,6 +16,9 @@ RT-AC1200G+.
   Upload now matches or beats the Broadcom `wl` driver (73/80 at best).
 - **Per-chain RSSI (patch 890):** `iw dev phy0-ap0 station dump | grep signal`
   shows both chains, e.g. `-44 [-44, -48]`.
+- `wl/` (5 GHz, build it yourself): 2.4 GHz now stays on b43 by default;
+  `wireless.radio0.use_wl=1` moves it to `wl` (replaces `keep_b43`).
+- README: new section "NAT fast path".
 - Tested on the author's router with the same b43 module (63c5f917), settings
   kept. The release images themselves were not fresh-installed. Kernel and fast
   path unchanged from v25.12.6-5.
