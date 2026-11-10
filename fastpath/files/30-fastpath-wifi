@@ -1,0 +1,3 @@
+# hotplug.d/net: a wl radio registered - put it into the flowtable
+[ "$ACTION" = add ] || exit 0
+case "$INTERFACE" in eth*) /usr/libexec/fastpath-wifi.sh ;; esac

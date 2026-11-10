@@ -37,8 +37,8 @@ jobs:
       - name: Download SDK
         run: |
           mkdir -p build/dl build/out build/images
-          mkdir -p build/out-ht build/out-kernel
-          chmod a+rwx build/out build/out-ht build/out-kernel build/images   # containers run as uid 1000
+          mkdir -p build/out-ht build/out-kernel-fastpath
+          chmod a+rwx build/out build/out-ht build/out-kernel-fastpath build/images   # containers run as uid 1000
           U=https://downloads.openwrt.org/releases/$OWRT_VERSION/targets/bcm53xx/generic
           cd build/dl
           [ -f "$SDK" ] || curl -fLO "$U/$SDK"
@@ -50,14 +50,14 @@ jobs:
       - name: "Build kmod-b43 (802.11n: PR 25922 series + 880/881, firmware 784.2)"
         run: HT=1 FW630=1 build/run-build.sh
 
-      - name: "Build the kernel with the bgmac fix (patches/kernel, 1-2 h)"
-        run: build/build-kernel.sh
+      - name: "Build the fast-path kernel + fastpath.ko (patches/kernel-fastpath, fastpath/, 1-2 h)"
+        run: FASTPATH=1 build/build-kernel.sh
 
       - name: Build images
         run: |
           pip install --user fdt
-          HT=1 ZIMAGE=build/out-kernel/zImage build/make-image.sh
-          HT=1 ZIMAGE=build/out-kernel/zImage FIRSTBOOT=1 build/make-image.sh
+          HT=1 FASTPATH=1 ZIMAGE=build/out-kernel-fastpath/zImage build/make-image.sh
+          HT=1 FASTPATH=1 ZIMAGE=build/out-kernel-fastpath/zImage FIRSTBOOT=1 build/make-image.sh
 
       - name: Collect
         run: |
@@ -65,7 +65,8 @@ jobs:
           cp build/images/*.trx dist/
           cp build/out-ht/b43-stripped.ko dist/b43-$KVER.ko
           cp build/out-ht/kmod-b43-*.apk dist/
-          cp build/out-kernel/zImage dist/zImage-$KVER-bgmac64
+          cp build/out-kernel-fastpath/zImage dist/zImage-$KVER-fastpath
+          cp build/out-kernel-fastpath/fastpath.ko dist/fastpath-$KVER.ko
           cd dist && sha256sum * > sha256sums && cat sha256sums
 
       - uses: actions/upload-artifact@v4

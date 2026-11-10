@@ -11,6 +11,10 @@
 #                                 Optional: build/out-iwinfo/ (wl/build-iwinfo.sh) for
 #                                 LuCI's Wi-Fi status, ZIMAGE=<file> for another kernel.
 #                                 The result contains Broadcom's code: keep it private.
+#   FASTPATH=1 ZIMAGE=build/out-kernel-fastpath/zImage ./make-image.sh
+#                                 NAT fast path (fastpath/, from FASTPATH=1 build-kernel.sh):
+#                                 fastpath.ko autoloaded + its nftables/hotplug files.
+#                                 Only with that kernel (the module is built against it).
 # Needs: Docker, build/out[-ht]/b43-stripped.ko, python3 with `fdt` + liblzma >= 5.4
 # for tools/patch-trx-dtb.py (PYTHON=... to pick the interpreter).
 set -euo pipefail
@@ -49,6 +53,19 @@ mkdir -p "$F/lib/modules/$KVER" && cp "$KO" "$F/lib/modules/$KVER/b43.ko"
 # firmware 784.2 for the BCM43217 when the module was built with FW630=1 (over the package's 666.2)
 if [ -d "$(dirname "$KO")/fw" ]; then
 	mkdir -p "$F/lib/firmware/b43" && cp "$(dirname "$KO")"/fw/*.fw "$F/lib/firmware/b43/"
+fi
+if [ -n "${FASTPATH:-}" ]; then   # fastpath/Makefile installs the same files
+	FPKO=$(dirname "${ZIMAGE:-/nonexistent}")/fastpath.ko
+	[ -f "$FPKO" ] || { echo "FASTPATH=1 needs ZIMAGE=<dir>/zImage with <dir>/fastpath.ko (FASTPATH=1 build-kernel.sh)"; exit 1; }
+	FP=$H/fastpath/files
+	mkdir -p "$F/etc/modules.d" "$F/etc/nftables.d" "$F/usr/libexec" "$F/etc/hotplug.d/net" "$F/etc/uci-defaults"
+	cp "$FPKO" "$F/lib/modules/$KVER/fastpath.ko"
+	echo fastpath > "$F/etc/modules.d/fastpath"
+	cp "$FP/20-fastpath.nft" "$F/etc/nftables.d/20-fastpath.nft"
+	cp "$FP/fastpath-wifi.sh" "$F/usr/libexec/fastpath-wifi.sh"
+	cp "$FP/30-fastpath-wifi" "$F/etc/hotplug.d/net/30-fastpath-wifi"
+	cp "$FP/fastpath.uci-defaults" "$F/etc/uci-defaults/90-fastpath-wifi"
+	chmod 755 "$F/usr/libexec/fastpath-wifi.sh" "$F/etc/uci-defaults/90-fastpath-wifi"
 fi
 if [ -n "${WL:-}" ]; then   # see wl/README.md for what each piece does
 	W=$H/wl/files

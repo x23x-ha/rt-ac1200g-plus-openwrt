@@ -1,0 +1,10 @@
+#!/bin/sh
+# fw4 script include that re-adds the wl radio to the flowtable after every
+# firewall reload (see /usr/libexec/fastpath-wifi.sh)
+uci -q get firewall.fastpath_wifi >/dev/null && exit 0
+uci set firewall.fastpath_wifi=include
+uci set firewall.fastpath_wifi.type=script
+uci set firewall.fastpath_wifi.path=/usr/libexec/fastpath-wifi.sh
+uci set firewall.fastpath_wifi.fw4_compatible=1
+uci commit firewall
+exit 0

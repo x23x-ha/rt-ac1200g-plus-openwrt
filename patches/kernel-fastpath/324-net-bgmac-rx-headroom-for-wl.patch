@@ -1,0 +1,23 @@
+From: Archer C1200 v2 port
+Subject: [PATCH] net: bgmac: leave room for the wl driver headers
+
+Frames bridged or routed to the Broadcom wl radio need 192 bytes of
+headroom for its d11/802.11 headers.
+---
+--- a/drivers/net/ethernet/broadcom/bgmac.h	2026-10-30 02:02:06.373981679 +0100
++++ b/drivers/net/ethernet/broadcom/bgmac.h	2026-10-30 02:02:06.389981679 +0100
+@@ -326,8 +326,13 @@
+ 
+ #define BGMAC_RX_HEADER_LEN			28		/* Last 24 bytes are unused. Well... */
+ #define BGMAC_RX_FRAME_OFFSET			30		/* There are 2 unused bytes between header and real data */
++/* 160 extra bytes in front of every received frame: frames forwarded to the
++ * Broadcom wl Wi-Fi driver get its 192-byte d11/802.11 headers built in
++ * place, instead of a separate header buffer allocated per frame (and its
++ * packet chaining needs the room). Keeps the IP header 4-byte aligned. */
++#define BGMAC_RX_EXTRA_HEADROOM			160
+ #define BGMAC_RX_BUF_OFFSET			(NET_SKB_PAD + NET_IP_ALIGN - \
+-						 BGMAC_RX_FRAME_OFFSET)
++						 BGMAC_RX_FRAME_OFFSET + BGMAC_RX_EXTRA_HEADROOM)
+ #define BGMAC_RX_MAX_FRAME_SIZE			1536
+ #define BGMAC_RX_BUF_SIZE			(BGMAC_RX_FRAME_OFFSET + BGMAC_RX_MAX_FRAME_SIZE)
+ #define BGMAC_RX_ALLOC_SIZE			(SKB_DATA_ALIGN(BGMAC_RX_BUF_SIZE + BGMAC_RX_BUF_OFFSET) + \

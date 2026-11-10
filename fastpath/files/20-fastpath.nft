@@ -1,0 +1,8 @@
+# Included by fw4 inside "table inet fw4" (install as /etc/nftables.d/20-fastpath.nft).
+# Adds the switch ports to fw4's flowtable so offloaded flows get direct xmit
+# (egress port + MACs) - what the fastpath module forwards on. Same hook and
+# priority as fw4's own declaration, so the two merge into one flowtable.
+flowtable ft {
+	hook ingress priority 0;
+	devices = { "wan", "lan1", "lan2", "lan3", "lan4" };
+}

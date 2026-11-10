@@ -1,0 +1,363 @@
+From: local
+Subject: [PATCH] net: bgmac: add a receive fast path hook, RX write-completion knob
+
+Lets a module claim received frames before they enter the stack, so
+established NAT flows can be forwarded straight from the RX ring to a TX
+ring (a CTF-like fast path). NULL by default: no change in behaviour.
+
+Also sets the RX DMA "wait for completion" bit (rx_waitcmp, off by default until proven):
+without it frames forwarded straight out of their receive buffer went out
+with stale bytes on BCM53573.
+---
+--- a/drivers/net/ethernet/broadcom/bgmac.h	2026-10-29 01:17:07.806354027 +0100
++++ b/drivers/net/ethernet/broadcom/bgmac.h	2026-10-29 01:17:07.826375296 +0100
+@@ -321,7 +321,7 @@
+ #define BGMAC_MAX_TX_RINGS			4
+ #define BGMAC_MAX_RX_RINGS			1
+ 
+-#define BGMAC_TX_RING_SLOTS			128
++#define BGMAC_TX_RING_SLOTS			512	/* was 128: too few for forwarding at line rate */
+ #define BGMAC_RX_RING_SLOTS			512
+ 
+ #define BGMAC_RX_HEADER_LEN			28		/* Last 24 bytes are unused. Well... */
+@@ -395,6 +395,8 @@
+ 		void *buf;
+ 	};
+ 	dma_addr_t dma_addr;
++	u16 len;	/* TX: mapped length, so completion needs no descriptor read */
++	u8 sof;		/* TX: first slot of a frame (mapped with dma_map_single) */
+ };
+ 
+ struct bgmac_dma_desc {
+@@ -437,7 +439,14 @@
+ 	__le16 pad[12];
+ };
+ 
++#define BGMAC_RX_RECYCLE	256
++
+ struct bgmac {
++	/* receive buffers back from in-place forwarding, still DMA-mapped
++	 * clean (see bgmac_dma_tx_free) */
++	void *rx_recycle[BGMAC_RX_RECYCLE];
++	unsigned int rx_recycle_n;
++
+ 	union {
+ 		struct {
+ 			void __iomem *base;
+--- a/drivers/net/ethernet/broadcom/bgmac.c	2026-10-29 01:17:07.806354027 +0100
++++ b/drivers/net/ethernet/broadcom/bgmac.c	2026-10-29 01:17:07.826375296 +0100
+@@ -84,6 +84,19 @@
+ 	}
+ }
+ 
++/* TX DMA read setup for cores with TX_MASK_SETUP (applied at ring enable).
++ * Northstar used 128-byte bursts; on BCM53573 those corrupt frames under
++ * load (128..448 bytes before the frame end, one burst's data landing in the
++ * previous burst's place - seen as bytes shifted by exactly 128). 64-byte
++ * bursts measured clean at full speed, so that is the default here.
++ */
++static int tx_mr = BGMAC_DMA_TX_MR_2;
++module_param(tx_mr, int, 0644);
++MODULE_PARM_DESC(tx_mr, "TX DMA outstanding reads: 0 = one, 1 = two");
++static int tx_bl = BGMAC_DMA_TX_BL_64;
++module_param(tx_bl, int, 0644);
++MODULE_PARM_DESC(tx_bl, "TX DMA burst length: 0 = 16 bytes ... 6 = 1024");
++
+ static void bgmac_dma_tx_enable(struct bgmac *bgmac,
+ 				struct bgmac_dma_ring *ring)
+ {
+@@ -92,10 +105,10 @@
+ 	ctl = bgmac_read(bgmac, ring->mmio_base + BGMAC_DMA_TX_CTL);
+ 	if (bgmac->feature_flags & BGMAC_FEAT_TX_MASK_SETUP) {
+ 		ctl &= ~BGMAC_DMA_TX_BL_MASK;
+-		ctl |= BGMAC_DMA_TX_BL_128 << BGMAC_DMA_TX_BL_SHIFT;
++		ctl |= (tx_bl & 7) << BGMAC_DMA_TX_BL_SHIFT;
+ 
+ 		ctl &= ~BGMAC_DMA_TX_MR_MASK;
+-		ctl |= BGMAC_DMA_TX_MR_2 << BGMAC_DMA_TX_MR_SHIFT;
++		ctl |= (tx_mr & 3) << BGMAC_DMA_TX_MR_SHIFT;
+ 
+ 		ctl &= ~BGMAC_DMA_TX_PC_MASK;
+ 		ctl |= BGMAC_DMA_TX_PC_16 << BGMAC_DMA_TX_PC_SHIFT;
+@@ -129,10 +142,20 @@
+ 	dma_desc->ctl1 = cpu_to_le32(ctl1);
+ }
+ 
++/* Set by a fast path module (under the TX queue lock, right before
++ * ndo_start_xmit) to the number of leading bytes it rewrote in a frame it is
++ * forwarding from a receive buffer. The rest of the frame was never written by
++ * the CPU, so it cannot be dirty in the cache: only the rewritten head needs
++ * cleaning before the DMA reads it. Consumed by the next frame queued.
++ */
++unsigned int bgmac_tx_dirty_hint;
++EXPORT_SYMBOL_GPL(bgmac_tx_dirty_hint);
++
+ static netdev_tx_t bgmac_dma_tx_add(struct bgmac *bgmac,
+ 				    struct bgmac_dma_ring *ring,
+ 				    struct sk_buff *skb)
+ {
++	unsigned int dirty = bgmac_tx_dirty_hint;
+ 	struct device *dma_dev = bgmac->dma_dev;
+ 	struct net_device *net_dev = bgmac->net_dev;
+ 	int index = ring->end % BGMAC_TX_RING_SLOTS;
+@@ -160,10 +183,23 @@
+ 		return NETDEV_TX_BUSY;
+ 	}
+ 
+-	slot->dma_addr = dma_map_single(dma_dev, skb->data, skb_headlen(skb),
+-					DMA_TO_DEVICE);
+-	if (unlikely(dma_mapping_error(dma_dev, slot->dma_addr)))
+-		goto err_dma_head;
++	bgmac_tx_dirty_hint = 0;
++	if (dirty && dirty < skb_headlen(skb)) {
++		slot->dma_addr = dma_map_single_attrs(dma_dev, skb->data,
++						      skb_headlen(skb), DMA_TO_DEVICE,
++						      DMA_ATTR_SKIP_CPU_SYNC);
++		if (unlikely(dma_mapping_error(dma_dev, slot->dma_addr)))
++			goto err_dma_head;
++		dma_sync_single_for_device(dma_dev, slot->dma_addr, dirty,
++					   DMA_TO_DEVICE);
++	} else {
++		slot->dma_addr = dma_map_single(dma_dev, skb->data,
++						skb_headlen(skb), DMA_TO_DEVICE);
++		if (unlikely(dma_mapping_error(dma_dev, slot->dma_addr)))
++			goto err_dma_head;
++	}
++	slot->len = skb_headlen(skb);
++	slot->sof = 1;
+ 
+ 	flags = BGMAC_DESC_CTL0_SOF;
+ 	if (!nr_frags)
+@@ -182,6 +218,8 @@
+ 						  len, DMA_TO_DEVICE);
+ 		if (unlikely(dma_mapping_error(dma_dev, slot->dma_addr)))
+ 			goto err_dma;
++		slot->len = len;
++		slot->sof = 0;
+ 
+ 		if (i == nr_frags - 1)
+ 			flags |= BGMAC_DESC_CTL0_EOF | BGMAC_DESC_CTL0_IOC;
+@@ -233,6 +271,29 @@
+ }
+ 
+ /* Free transmitted packets */
++/* While a hook is installed, only the head of each receive buffer is
++ * invalidated before the hook sees it (all a forwarding hook reads: RX
++ * header, MAC, tag, IPv4, TCP/UDP header). A frame the hook forwards is never
++ * read further by the CPU, so the rest of the buffer needs no cache work; a
++ * frame it passes on gets the full invalidate before entering the stack.
++ * A hook that wants to read whole frames clears this.
++ */
++#define BGMAC_RX_LAZY_HEAD	(BGMAC_RX_FRAME_OFFSET + 160)
++bool bgmac_rx_lazy_sync = true;
++EXPORT_SYMBOL_GPL(bgmac_rx_lazy_sync);
++module_param_named(rx_lazy_sync, bgmac_rx_lazy_sync, bool, 0644);
++
++/* skb->cb marker a fast path hook puts on frames it forwards in place */
++#define BGMAC_CB_INPLACE	0x46505450
++
++static bool bgmac_rx_recyclable(struct bgmac *bgmac, struct sk_buff *skb)
++{
++	return *(u32 *)skb->cb == BGMAC_CB_INPLACE &&
++	       READ_ONCE(bgmac_rx_lazy_sync) && skb->head_frag &&
++	       !skb_cloned(skb) && !skb_shinfo(skb)->nr_frags &&
++	       bgmac->rx_recycle_n < BGMAC_RX_RECYCLE;
++}
++
+ static void bgmac_dma_tx_free(struct bgmac *bgmac, struct bgmac_dma_ring *ring)
+ {
+ 	struct device *dma_dev = bgmac->dma_dev;
+@@ -249,16 +310,15 @@
+ 	while (ring->start != ring->end) {
+ 		int slot_idx = ring->start % BGMAC_TX_RING_SLOTS;
+ 		struct bgmac_slot_info *slot = &ring->slots[slot_idx];
+-		u32 ctl0, ctl1;
+ 		int len;
+ 
+ 		if (slot_idx == empty_slot)
+ 			break;
+ 
+-		ctl0 = le32_to_cpu(ring->cpu_base[slot_idx].ctl0);
+-		ctl1 = le32_to_cpu(ring->cpu_base[slot_idx].ctl1);
+-		len = ctl1 & BGMAC_DESC_CTL1_LEN;
+-		if (ctl0 & BGMAC_DESC_CTL0_SOF)
++		/* length and SOF were kept in the slot: reading them back from
++		 * the (uncached) descriptor costs two slow loads per frame */
++		len = slot->len;
++		if (slot->sof)
+ 			/* Unmap no longer used buffer */
+ 			dma_unmap_single(dma_dev, slot->dma_addr, len,
+ 					 DMA_TO_DEVICE);
+@@ -272,8 +332,17 @@
+ 			bytes_compl += slot->skb->len;
+ 			pkts_compl++;
+ 
+-			/* Free memory! :) */
+-			dev_kfree_skb(slot->skb);
++			/* A receive buffer forwarded in place by a fast path hook
++			 * (marked in skb->cb) goes straight back to the RX ring: the
++			 * CPU wrote only its header, which was cleaned for this TX,
++			 * so re-arming it needs no full cache invalidate. */
++			if (bgmac_rx_recyclable(bgmac, slot->skb)) {
++				get_page(virt_to_head_page(slot->skb->head));
++				bgmac->rx_recycle[bgmac->rx_recycle_n++] = slot->skb->head;
++			}
++			/* Free memory! :) - only called from NAPI poll, so the
++			 * skb head can go back to the NAPI cache */
++			napi_consume_skb(slot->skb, 1);
+ 			slot->skb = NULL;
+ 		}
+ 
+@@ -304,6 +373,16 @@
+ 			ring->mmio_base);
+ }
+ 
++/* Broadcom's DMA engine can update the RX descriptor pointer before the
++ * frame's data writes have completed, unless "wait for completion" is set.
++ * Broadcom's own driver keeps that bit; bgmac rebuilt the register without
++ * it. Applies on the next ring enable (interface up).
++ */
++#define BGMAC_DMA_RX_WAITCMP			0x00001000
++static bool rx_waitcmp;
++module_param(rx_waitcmp, bool, 0644);
++MODULE_PARM_DESC(rx_waitcmp, "RX DMA waits for data writes before advancing");
++
+ static void bgmac_dma_rx_enable(struct bgmac *bgmac,
+ 				struct bgmac_dma_ring *ring)
+ {
+@@ -327,6 +406,8 @@
+ 	ctl |= BGMAC_DMA_RX_ENABLE;
+ 	ctl |= BGMAC_DMA_RX_PARITY_DISABLE;
+ 	ctl |= BGMAC_DMA_RX_OVERFLOW_CONT;
++	if (rx_waitcmp)
++		ctl |= BGMAC_DMA_RX_WAITCMP;
+ 	ctl |= BGMAC_RX_FRAME_OFFSET << BGMAC_DMA_RX_FRAME_OFFSET_SHIFT;
+ 	bgmac_write(bgmac, ring->mmio_base + BGMAC_DMA_RX_CTL, ctl);
+ }
+@@ -339,6 +420,26 @@
+ 	struct bgmac_rx_header *rx;
+ 	void *buf;
+ 
++	if (bgmac->rx_recycle_n) {
++		buf = bgmac->rx_recycle[--bgmac->rx_recycle_n];
++		rx = buf + BGMAC_RX_BUF_OFFSET;
++		rx->len = cpu_to_le16(0xdead);
++		rx->flags = cpu_to_le16(0xbeef);
++		dma_addr = dma_map_single_attrs(dma_dev, buf + BGMAC_RX_BUF_OFFSET,
++						BGMAC_RX_BUF_SIZE, DMA_FROM_DEVICE,
++						DMA_ATTR_SKIP_CPU_SYNC);
++		if (dma_mapping_error(dma_dev, dma_addr)) {
++			put_page(virt_to_head_page(buf));
++			return -ENOMEM;
++		}
++		/* only the head was ever touched by the CPU */
++		dma_sync_single_for_device(dma_dev, dma_addr, BGMAC_RX_LAZY_HEAD,
++					   DMA_FROM_DEVICE);
++		slot->buf = buf;
++		slot->dma_addr = dma_addr;
++		return 0;
++	}
++
+ 	/* Alloc skb */
+ 	buf = netdev_alloc_frag(BGMAC_RX_ALLOC_SIZE);
+ 	if (!buf)
+@@ -410,6 +511,14 @@
+ 				   DMA_FROM_DEVICE);
+ }
+ 
++/* Receive fast path hook: a module may claim frames before they enter the
++ * stack (e.g. to forward established flows straight to a TX ring). It gets
++ * the skb after eth_type_trans() and returns true if it consumed it.
++ */
++bool (__rcu *bgmac_rx_hook)(struct sk_buff *skb);
++EXPORT_SYMBOL_GPL(bgmac_rx_hook);
++
++
+ static int bgmac_dma_rx_read(struct bgmac *bgmac, struct bgmac_dma_ring *ring,
+ 			     int weight)
+ {
+@@ -429,6 +538,8 @@
+ 		struct sk_buff *skb;
+ 		void *buf = slot->buf;
+ 		dma_addr_t dma_addr = slot->dma_addr;
++		bool (*hook)(struct sk_buff *skb) = rcu_dereference(bgmac_rx_hook);
++		bool lazy = hook && READ_ONCE(bgmac_rx_lazy_sync);
+ 		u16 len, flags;
+ 
+ 		do {
+@@ -438,14 +549,27 @@
+ 				break;
+ 			}
+ 
+-			/* Unmap buffer to make it accessible to the CPU */
+-			dma_unmap_single(dma_dev, dma_addr,
+-					 BGMAC_RX_BUF_SIZE, DMA_FROM_DEVICE);
++			/* Unmap buffer to make it accessible to the CPU (lazy:
++			 * just its head for now, see bgmac_rx_lazy_sync) */
++			if (lazy)
++				dma_sync_single_for_cpu(dma_dev, dma_addr,
++							BGMAC_RX_LAZY_HEAD,
++							DMA_FROM_DEVICE);
++			else
++				dma_unmap_single(dma_dev, dma_addr,
++						 BGMAC_RX_BUF_SIZE, DMA_FROM_DEVICE);
+ 
+ 			/* Get info from the header */
+ 			len = le16_to_cpu(rx->len);
+ 			flags = le16_to_cpu(rx->flags);
+ 
++			if (lazy && ((len == 0xdead && flags == 0xbeef) ||
++				     len > BGMAC_RX_ALLOC_SIZE)) {
++				dma_unmap_single(dma_dev, dma_addr,
++						 BGMAC_RX_BUF_SIZE, DMA_FROM_DEVICE);
++				lazy = false;
++			}
++
+ 			/* Check for poison and drop or pass the packet */
+ 			if (len == 0xdead && flags == 0xbeef) {
+ 				netdev_err(bgmac->net_dev, "Found poisoned packet at slot %d, DMA issue!\n",
+@@ -467,8 +591,13 @@
+ 			/* Omit CRC. */
+ 			len -= ETH_FCS_LEN;
+ 
+-			skb = build_skb(buf, BGMAC_RX_ALLOC_SIZE);
++			/* NAPI context: skb heads come from the per-CPU NAPI cache */
++			skb = napi_build_skb(buf, BGMAC_RX_ALLOC_SIZE);
+ 			if (unlikely(!skb)) {
++				if (lazy)
++					dma_unmap_single(dma_dev, dma_addr,
++							 BGMAC_RX_BUF_SIZE,
++							 DMA_FROM_DEVICE);
+ 				netdev_err(bgmac->net_dev, "build_skb failed\n");
+ 				put_page(virt_to_head_page(buf));
+ 				bgmac->net_dev->stats.rx_errors++;
+@@ -483,8 +612,19 @@
+ 			skb->protocol = eth_type_trans(skb, bgmac->net_dev);
+ 			bgmac->net_dev->stats.rx_bytes += len;
+ 			bgmac->net_dev->stats.rx_packets++;
+-			napi_gro_receive(&bgmac->napi, skb);
+ 			handled++;
++			if (hook && hook(skb)) {
++				if (lazy)
++					dma_unmap_single_attrs(dma_dev, dma_addr,
++							       BGMAC_RX_BUF_SIZE,
++							       DMA_FROM_DEVICE,
++							       DMA_ATTR_SKIP_CPU_SYNC);
++				break;
++			}
++			if (lazy)
++				dma_unmap_single(dma_dev, dma_addr,
++						 BGMAC_RX_BUF_SIZE, DMA_FROM_DEVICE);
++			napi_gro_receive(&bgmac->napi, skb);
+ 		} while (0);
+ 
+ 		bgmac_dma_rx_setup_desc(bgmac, ring, ring->start);
+@@ -568,6 +708,8 @@
+ 		put_page(virt_to_head_page(slot->buf));
+ 		slot->dma_addr = 0;
+ 	}
++	while (bgmac->rx_recycle_n)
++		put_page(virt_to_head_page(bgmac->rx_recycle[--bgmac->rx_recycle_n]));
+ }
+ 
+ static void bgmac_dma_ring_desc_free(struct bgmac *bgmac,

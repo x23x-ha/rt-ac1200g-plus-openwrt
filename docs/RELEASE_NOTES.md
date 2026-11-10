@@ -6,7 +6,21 @@ rescue, back to stock and back to OpenWrt. See the README for flashing and
 recovery, and verify the files against `sha256sums`. Only flash the `asus_rt-ac1200g-plus` images on an
 RT-AC1200G+.
 
-## What's new in v25.12.6-4
+## What's new in v25.12.6-5
+
+- **NAT fast path** (`fastpath.ko`, from Vygis1's Archer C1200 v2 port): wired
+  NAT about doubles, 758-819 Mbit/s down against 378-411 with flow offloading
+  alone. It only works with **Software flow offloading** on (LuCI: Network ->
+  Firewall), which a fresh install has off. See the README section
+  "NAT fast path".
+- The kernel now carries the fast-path hook (patch 323, which also includes the
+  bgmac 64-byte TX burst fix of the earlier releases) and 324 (RX headroom).
+  `zImage-6.12.112-fastpath` and `fastpath-6.12.112.ko` are attached.
+- Tested on the author's router with the same kernel and module (flashed, 30 min
+  load test); the release images themselves were not fresh-installed.
+- 2.4 GHz driver and firmware unchanged from v25.12.6-4.
+
+## v25.12.6-4
 
 - **New 2.4 GHz driver patches: two streams and A-MPDU now work.** The b43 set
   is now OpenWrt PR #25922 at 1e3c416ee5, which includes Ville Takio's
