@@ -1,0 +1,15 @@
+#!/bin/sh /etc/rc.common
+# Ethernet flow control off on the switch ports. With it on, the switch sends
+# pause frames whenever the CPU port is briefly busy: a PC uploading through
+# the router was paused hundreds of times a minute and got ~580 instead of
+# ~800-900 Mbit/s (many NICs recover slowly from pauses). Without it the switch
+# drops the odd frame instead and TCP retransmits it.
+START=99
+
+start() {
+	command -v ethtool >/dev/null || return 0
+	for p in wan lan1 lan2 lan3 lan4; do
+		[ -e /sys/class/net/$p ] && ethtool -A $p autoneg off rx off tx off 2>/dev/null
+	done
+	return 0
+}

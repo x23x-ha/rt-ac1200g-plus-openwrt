@@ -4,11 +4,14 @@
  *
  * bgmac hands every received frame to fp_rx() (the bgmac_rx_hook from patch
  * 323) before it enters the stack. For IPv4 TCP/UDP frames that belong to a
- * flow the kernel has already offloaded into the netfilter flowtable, with
- * direct xmit to another switch port on the same conduit, the frame is NATed
- * in place (addresses, ports, checksums, TTL), the MACs and the Broadcom tag
- * are rewritten for the egress port, and it goes straight onto the conduit's
- * TX ring. No bridge, DSA, netfilter, routing, neighbour or qdisc work.
+ * flow the kernel has already offloaded into the netfilter flowtable, going
+ * out of another switch port on the same conduit, the frame is NATed in place
+ * (addresses, ports, checksums, TTL), the MACs and the Broadcom tag are
+ * rewritten for the egress port, and it goes straight onto the conduit's TX
+ * ring. No bridge, DSA, netfilter, routing or qdisc work. Flows with direct
+ * xmit carry their MACs; "neighbour" flows (out of a port that is not in a
+ * bridge, e.g. LAN -> wan: every upload) get the next hop's MAC from the
+ * cached route's neighbour entry (fp_out4).
  * Everything else - and any packet that fails a check - returns false
  * untouched and takes the normal path.
  *
@@ -42,6 +45,9 @@
 #include <linux/uaccess.h>
 #include <linux/netfilter.h>
 #include <net/ip.h>
+#include <net/route.h>
+#include <net/arp.h>
+#include <net/neighbour.h>
 #include <net/dsa.h>
 #include <net/sch_generic.h>
 #include <linux/bcma/bcma.h>
@@ -190,6 +196,7 @@ MODULE_PARM_DESC(tail_copy, "bytes at the end of each forwarded frame sent from 
 static struct {
 	u64 fwd, fwd_bytes;
 	u64 not_ip, no_port, no_ft, no_flow, not_direct, other_out, fin_rst, mtu;
+	u64 neigh, neigh_miss;
 	u64 busy, busy_drop, xmit_err;
 	u64 checked, bad_rx, bad_tx;
 	u64 mem_checked, mem_bad;
@@ -261,6 +268,55 @@ static int fp_port_of_ifindex(int ifindex)
 	if (fp_is_wifi_ifindex(ifindex))
 		return FP_OUT_WIFI;
 	return -1;
+}
+
+/*
+ * Egress port and MACs of an IPv4 flow. "Direct" entries (path through a
+ * bridge) carry both MACs. "Neighbour" entries (e.g. LAN -> a WAN port that is
+ * not in a bridge: every upload) only carry the route; resolve the next hop as
+ * nf_flow_offload_ip_hook() does. Called in softirq (RCU held).
+ */
+static bool fp_out4(const struct flow_offload *flow,
+		    const struct flow_offload_tuple_rhash *th, int dir,
+		    int *outport, u8 *dmac, u8 *smac)
+{
+	const struct dst_entry *dst;
+	struct net_device *odev;
+	struct neighbour *n;
+	__be32 nh;
+
+	if (th->tuple.encap_num)
+		return false;
+	if (th->tuple.xmit_type == FLOW_OFFLOAD_XMIT_DIRECT) {
+		*outport = fp_port_of_ifindex(th->tuple.out.ifidx);
+		memcpy(dmac, th->tuple.out.h_dest, ETH_ALEN);
+		memcpy(smac, th->tuple.out.h_source, ETH_ALEN);
+		return true;
+	}
+	if (th->tuple.xmit_type != FLOW_OFFLOAD_XMIT_NEIGH ||
+	    th->tuple.l3proto != AF_INET)
+		return false;
+	dst = th->tuple.dst_cache;
+	if (!dst || !dst_check((struct dst_entry *)dst, th->tuple.dst_cookie))
+		goto miss;
+	odev = dst->dev;
+	*outport = fp_port_of_ifindex(odev->ifindex);
+	if (*outport < 0 || *outport == FP_OUT_WIFI)
+		goto miss;
+	nh = rt_nexthop((struct rtable *)dst, flow->tuplehash[!dir].tuple.src_v4.s_addr);
+	n = __ipv4_neigh_lookup_noref(odev, (__force u32)nh);
+	if (!n || !(READ_ONCE(n->nud_state) & NUD_VALID))
+		goto miss;
+	/* the kernel no longer sees these packets: keep the entry confirmed */
+	if (!(READ_ONCE(n->nud_state) & NUD_CONNECTED))
+		neigh_event_send(n, NULL);
+	neigh_ha_snapshot(dmac, n, odev);
+	memcpy(smac, odev->dev_addr, ETH_ALEN);
+	st.neigh++;
+	return true;
+miss:
+	st.neigh_miss++;
+	return false;
 }
 
 /* IPv4 address NAT as nf_flow_table_ip.c does it (those helpers are static) */
@@ -802,11 +858,11 @@ fp_lookup6(struct nf_flowtable *ft, struct flow_offload_tuple *tuple)
 }
 
 /* New MACs from the flow, Broadcom tag turned into an egress-directed one. */
-static void fp_retag(u8 *mac, u8 *tag, const struct flow_offload_tuple_rhash *th,
+static void fp_retag(u8 *mac, u8 *tag, const u8 *dmac, const u8 *smac,
 		     int outport)
 {
-	memcpy(mac, th->tuple.out.h_dest, ETH_ALEN);
-	memcpy(mac + ETH_ALEN, th->tuple.out.h_source, ETH_ALEN);
+	memcpy(mac, dmac, ETH_ALEN);
+	memcpy(mac + ETH_ALEN, smac, ETH_ALEN);
 	tag[0] = 1 << BRCM_OPCODE_SHIFT;	/* egress-directed, TC 0 */
 	tag[1] = 0;
 	tag[2] = outport == 8 ? 1 : 0;
@@ -833,6 +889,7 @@ static bool fp_wifi_route(struct sk_buff *skb, u8 *eth, struct net_device *in)
 	struct iphdr *iph = NULL;
 	struct flow_ports *ports;
 	int outport;
+	u8 dmac[ETH_ALEN], smac[ETH_ALEN];
 	u8 proto;
 
 	if (etype == htons(ETH_P_IP)) {
@@ -884,10 +941,18 @@ static bool fp_wifi_route(struct sk_buff *skb, u8 *eth, struct net_device *in)
 		return false;
 	dir = th->tuple.dir;
 	flow = container_of(th, struct flow_offload, tuplehash[dir]);
-	if (test_bit(NF_FLOW_TEARDOWN, &flow->flags) || nf_ct_is_dying(flow->ct) ||
-	    th->tuple.xmit_type != FLOW_OFFLOAD_XMIT_DIRECT || th->tuple.encap_num)
+	if (test_bit(NF_FLOW_TEARDOWN, &flow->flags) || nf_ct_is_dying(flow->ct))
 		return false;
-	outport = fp_port_of_ifindex(th->tuple.out.ifidx);
+	if (iph) {
+		if (!fp_out4(flow, th, dir, &outport, dmac, smac))
+			return false;
+	} else {
+		if (th->tuple.xmit_type != FLOW_OFFLOAD_XMIT_DIRECT || th->tuple.encap_num)
+			return false;
+		outport = fp_port_of_ifindex(th->tuple.out.ifidx);
+		memcpy(dmac, th->tuple.out.h_dest, ETH_ALEN);
+		memcpy(smac, th->tuple.out.h_source, ETH_ALEN);
+	}
 	if (outport < 0 || outport == FP_OUT_WIFI || tot > th->tuple.mtu)
 		return false;
 	if (ip6h && (test_bit(NF_FLOW_SNAT, &flow->flags) || test_bit(NF_FLOW_DNAT, &flow->flags)))
@@ -917,7 +982,7 @@ static bool fp_wifi_route(struct sk_buff *skb, u8 *eth, struct net_device *in)
 		nf_ct_acct_update(flow->ct, dir, tot);
 	/* [new dst][new src][tag] in front of the EtherType */
 	skb_push(skb, skb->data - eth + BRCM_TAG_LEN);
-	fp_retag(skb->data, skb->data + 2 * ETH_ALEN, th, outport);
+	fp_retag(skb->data, skb->data + 2 * ETH_ALEN, dmac, smac, outport);
 	st.fwd++;
 	st.fwd_bytes += tot;
 	st.wifi_route_up++;
@@ -940,6 +1005,7 @@ static bool fp_rx6(struct sk_buff *skb, u8 *mac, u8 *tag, struct net_device *in)
 	struct flow_ports *ports;
 	unsigned int hdrsize, tot;
 	int outport;
+	u8 dmac[ETH_ALEN], smac[ETH_ALEN];
 
 	/* skb->data is 4 bytes before the IPv6 header */
 	if (skb->len < 4 + sizeof(*ip6h) + sizeof(struct udphdr) ||
@@ -994,6 +1060,8 @@ static bool fp_rx6(struct sk_buff *skb, u8 *mac, u8 *tag, struct net_device *in)
 		return false;
 	}
 	outport = fp_port_of_ifindex(th->tuple.out.ifidx);
+	memcpy(dmac, th->tuple.out.h_dest, ETH_ALEN);
+	memcpy(smac, th->tuple.out.h_source, ETH_ALEN);
 	if (outport < 0) {
 		st.other_out++;
 		return false;
@@ -1030,7 +1098,7 @@ static bool fp_rx6(struct sk_buff *skb, u8 *mac, u8 *tag, struct net_device *in)
 		fp_to_wifi(skb, mac, th, wdev);
 		return true;
 	}
-	fp_retag(mac, tag, th, outport);
+	fp_retag(mac, tag, dmac, smac, outport);
 
 	skb_push(skb, ETH_HLEN);
 	*(u32 *)skb->cb = FP_CB_INPLACE;
@@ -1059,6 +1127,7 @@ static bool fp_rx(struct sk_buff *skb)
 	struct iphdr *iph;
 	u8 *mac, *tag;
 	int srcport, outport;
+	u8 dmac[ETH_ALEN], smac[ETH_ALEN];
 	__be16 etype;
 
 	if (!READ_ONCE(enabled) || skb->dev != conduit)
@@ -1164,11 +1233,10 @@ static bool fp_rx(struct sk_buff *skb)
 		return false;
 	}
 
-	if (th->tuple.xmit_type != FLOW_OFFLOAD_XMIT_DIRECT || th->tuple.encap_num) {
+	if (!fp_out4(flow, th, dir, &outport, dmac, smac)) {
 		st.not_direct++;
 		return false;
 	}
-	outport = fp_port_of_ifindex(th->tuple.out.ifidx);
 	if (outport < 0) {
 		st.other_out++;
 		return false;
@@ -1228,7 +1296,7 @@ static bool fp_rx(struct sk_buff *skb)
 		fp_to_wifi(skb, mac, th, wdev);
 		return true;
 	}
-	fp_retag(mac, tag, th, outport);
+	fp_retag(mac, tag, dmac, smac, outport);
 
 	skb_push(skb, ETH_HLEN);
 	*(u32 *)skb->cb = (!copy_tx && !touch) ? FP_CB_INPLACE : 0;
@@ -1297,6 +1365,8 @@ static int fp_show(struct seq_file *m, void *v)
 	seq_printf(m, "slow path: not_ipv4_tcp_udp %llu no_port %llu no_flowtable %llu no_flow %llu not_direct %llu other_out %llu fin_rst %llu mtu %llu\n",
 		   st.not_ip, st.no_port, st.no_ft, st.no_flow, st.not_direct,
 		   st.other_out, st.fin_rst, st.mtu);
+	seq_printf(m, "neighbour (routed out, e.g. upload): resolved %llu missed %llu\n",
+		   st.neigh, st.neigh_miss);
 	seq_printf(m, "tx: ring_busy %llu (qdisc dropped %llu) xmit_err %llu\n",
 		   st.busy, st.busy_drop, st.xmit_err);
 	seq_printf(m, "wifi ifindex %d %d: routed %llu bridged %llu up %llu routed_up %llu (shortcut %d) queued_to_qdisc %llu\n",

@@ -65,7 +65,9 @@ if [ -n "${FASTPATH:-}" ]; then   # fastpath/Makefile installs the same files
 	cp "$FP/fastpath-wifi.sh" "$F/usr/libexec/fastpath-wifi.sh"
 	cp "$FP/30-fastpath-wifi" "$F/etc/hotplug.d/net/30-fastpath-wifi"
 	cp "$FP/fastpath.uci-defaults" "$F/etc/uci-defaults/90-fastpath-wifi"
-	chmod 755 "$F/usr/libexec/fastpath-wifi.sh" "$F/etc/uci-defaults/90-fastpath-wifi"
+	mkdir -p "$F/etc/init.d" && cp "$FP/no-pause.init" "$F/etc/init.d/no-pause"
+	chmod 755 "$F/usr/libexec/fastpath-wifi.sh" "$F/etc/uci-defaults/90-fastpath-wifi" "$F/etc/init.d/no-pause"
+	PACKAGES="$PACKAGES ethtool"	# for /etc/init.d/no-pause
 fi
 if [ -n "${WL:-}" ]; then   # see wl/README.md for what each piece does
 	W=$H/wl/files

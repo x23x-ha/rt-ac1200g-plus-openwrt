@@ -13,7 +13,7 @@ What works:
   Mbit/s on an iPhone (v25.12.6-6), as fast as or faster than Broadcom's `wl`.
   802.11g with the plain build.
 - **NAT fast path** (`fastpath.ko`, see [NAT fast path](#nat-fast-path)): wired
-  NAT 758-819 Mbit/s down.
+  NAT 814-896 down / 638-918 up Mbit/s, about what the stock firmware does.
 
 What doesn't:
 
@@ -155,16 +155,24 @@ stack, on top of OpenWrt's flow offloading.
 - `cat /proc/fastpath` shows whether it is enabled and its counters.
 - Module and kernel must be built together (`FASTPATH=1 build/build-kernel.sh`);
   `fastpath-6.12.112.ko` and `zImage-6.12.112-fastpath` are attached to the release.
+- **Uploads** (LAN -> WAN) take the fast path since v25.12.6-7. The kernel marks
+  flows that leave through a port outside a bridge (`wan`) as "neighbour"
+  flows without MACs; the module now resolves the next hop itself.
+- **Ethernet flow control is off** on the switch ports (`/etc/init.d/no-pause`,
+  needs `ethtool`, in the image). With it on, the switch paused an uploading
+  PC hundreds of times a minute whenever the CPU port was briefly busy, and
+  upload stayed near 580 Mbit/s whatever the CPU load.
 
 Measured on this router (down / up Mbit/s, three runs):
 
-| | flow offloading only | + fast path |
-|---|---|---|
-| wired PC through NAT | 380/435, 378/414, 411/432 | 819/550, 793/419, 758/536 |
-| iPhone, 5 GHz (`wl`) | 184/236, 193/263, 196/224 | 232/248, 247/233, 237/257 |
-| 2.4 GHz (b43) | unchanged | unchanged |
+| | flow offloading only | + fast path (v25.12.6-5) | + upload fix, no pause (v25.12.6-7) |
+|---|---|---|---|
+| wired PC through NAT | 380/435, 378/414, 411/432 | 819/550, 793/419, 758/536 | 865/638, 814/799, 896/918 |
+| iPhone, 5 GHz (`wl`) | 184/236, 193/263, 196/224 | 232/248, 247/233, 237/257 | 258/303 |
+| iPhone, 2.4 GHz (b43) | unchanged | unchanged | 75/80 |
 
-The stock ASUS firmware (hardware NAT) did about 868/790 wired.
+The stock ASUS firmware (Broadcom CTF) did about 868/790 wired. The same PC
+connected straight to the upstream router got about 800 up.
 
 ## 2.4 GHz: b43 patches
 

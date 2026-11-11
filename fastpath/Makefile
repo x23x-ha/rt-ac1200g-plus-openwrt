@@ -32,6 +32,8 @@ define KernelPackage/fastpath/install
 	$(INSTALL_BIN) ./files/fastpath-wifi.sh $(1)/usr/libexec/fastpath-wifi.sh
 	$(INSTALL_DATA) ./files/30-fastpath-wifi $(1)/etc/hotplug.d/net/30-fastpath-wifi
 	$(INSTALL_BIN) ./files/fastpath.uci-defaults $(1)/etc/uci-defaults/90-fastpath-wifi
+	$(INSTALL_DIR) $(1)/etc/init.d
+	$(INSTALL_BIN) ./files/no-pause.init $(1)/etc/init.d/no-pause
 endef
 
 define Build/Prepare

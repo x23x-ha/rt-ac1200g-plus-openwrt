@@ -1,4 +1,6 @@
 #!/bin/sh
+# switch ports without Ethernet flow control (see /etc/init.d/no-pause)
+[ -x /etc/init.d/no-pause ] && /etc/init.d/no-pause enable
 # fw4 script include that re-adds the wl radio to the flowtable after every
 # firewall reload (see /usr/libexec/fastpath-wifi.sh)
 uci -q get firewall.fastpath_wifi >/dev/null && exit 0

@@ -6,7 +6,22 @@ rescue, back to stock and back to OpenWrt. See the README for flashing and
 recovery, and verify the files against `sha256sums`. Only flash the `asus_rt-ac1200g-plus` images on an
 RT-AC1200G+.
 
-## What's new in v25.12.6-6
+## What's new in v25.12.6-7
+
+- **Uploads now take the NAT fast path.** Flows out of `wan` (not in a bridge)
+  are "neighbour" flows in the kernel's flowtable, without MACs; `fastpath.ko`
+  now resolves the next hop itself (it skipped them before: ~80 % of upload
+  packets went the slow path).
+- **Ethernet flow control off** on the switch ports (`/etc/init.d/no-pause`,
+  `ethtool` added to the image): the switch kept pausing an uploading PC.
+- Wired PC through NAT (down / up Mbit/s): 865/638, 814/799, 896/918, against
+  791/581, 732/596, 814/589 with v25.12.6-6. iPhone 5 GHz 258/303, 2.4 GHz 75/80.
+- Tested on the author's router (image with the same module and files flashed,
+  settings kept); the release images themselves were not fresh-installed. The
+  module tested there was built against the SDK kernel (same .config); the
+  release's is built with the release kernel.
+
+## v25.12.6-6
 
 - **2.4 GHz: second receive chain fixed (patch 891).** b43 set a chip control
   bit that, on the BCM43217, cuts the second chain's reception by about 30 dB.
